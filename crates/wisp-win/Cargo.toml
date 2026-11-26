@@ -3,6 +3,7 @@ name = "wisp-win"
 description = "Win32 helpers for Wisp: clipboard listener, single instance, autostart, monitors, caret, focus"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
 wisp-core.workspace = true

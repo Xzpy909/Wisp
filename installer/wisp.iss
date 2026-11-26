@@ -40,6 +40,7 @@ CloseApplications=no
 
 [Files]
 Source: "{#SourceExe}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{userprograms}\Wisp"; Filename: "{app}\wisp.exe"; Comment: "Clipboard history"
