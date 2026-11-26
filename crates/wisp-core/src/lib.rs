@@ -2,6 +2,7 @@
 //!
 //! Nothing in this crate touches Windows APIs, so it builds and tests on any OS.
 
+pub mod backup;
 pub mod clip;
 pub mod images;
 pub mod placement;

@@ -19,6 +19,7 @@ use slint::{
 use tray_icon::menu::MenuEvent;
 use tray_icon::{MouseButton, MouseButtonState, TrayIconEvent};
 use wisp_core::clip::{combine, now_secs, relative_time};
+use wisp_core::backup::{self, BackupInfo};
 use wisp_core::{images, popup_rect, Clip, ClipContent, Filter, Kind, PopupStyle, Settings, Store};
 use wisp_win::clipboard::{self, CaptureOptions};
 use wisp_win::{autostart, instance, paste, screen, window, Hwnd};
@@ -192,6 +193,10 @@ impl App {
         use crate::tray::Action;
         match self.tray.action_for(id) {
             Some(Action::Open) => self.show(),
+            Some(Action::Backups) => {
+                self.show();
+                self.open_backups();
+            }
             Some(Action::Style(s)) => {
                 self.settings.popup_style = s;
                 self.save();
@@ -387,6 +392,102 @@ impl App {
         self.refresh();
     }
 
+    fn open_backups(&mut self) {
+        self.popup.set_backup_status("".into());
+        self.popup.set_backup_error(false);
+        self.popup.set_confirm_path("".into());
+        self.popup.set_page(2);
+        self.refresh_backups();
+    }
+
+    fn refresh_backups(&self) {
+        let now = now_secs();
+        let rows = |list: Vec<BackupInfo>| -> slint::ModelRc<BackupRow> {
+            let rows: Vec<BackupRow> = list
+                .into_iter()
+                .map(|b| BackupRow {
+                    name: b.name.into(),
+                    detail: format!(
+                        "{} · saved {}",
+                        if b.clips == 1 { "1 clip".to_string() } else { format!("{} clips", b.clips) },
+                        saved_ago(b.created_at, now)
+                    )
+                    .into(),
+                    path: b.path.to_string_lossy().into_owned().into(),
+                })
+                .collect();
+            Rc::new(VecModel::from(rows)).into()
+        };
+        self.popup.set_backups(rows(backup::list(&backups_dir())));
+        self.popup.set_snapshots(rows(backup::list(&snapshots_dir())));
+    }
+
+    fn backup_status(&self, text: String, error: bool) {
+        self.popup.set_backup_status(text.into());
+        self.popup.set_backup_error(error);
+    }
+
+    fn create_backup(&mut self, name: &str) {
+        let Some(store) = self.store.as_ref() else { return };
+        let name = name.trim();
+        let Some(stem) = backup::file_stem_for(name) else {
+            return self.backup_status("Type a name for the backup first.".into(), true);
+        };
+        let path = backups_dir().join(format!("{stem}.{}", backup::EXTENSION));
+        match store.backup_to(&path, name, now_secs()) {
+            Ok(n) => {
+                self.backup_status(format!("Saved {} as \u{201c}{name}\u{201d}.", clips_label(n)), false);
+                self.popup.set_backup_name("".into());
+            }
+            Err(e) => self.backup_status(format!("Could not save the backup: {e}"), true),
+        }
+        self.refresh_backups();
+    }
+
+    /// Replace all clips with a backup, after saving them as a safety snapshot.
+    fn restore_backup(&mut self, path: &str) {
+        let Some(store) = self.store.as_ref() else { return };
+        let path = PathBuf::from(path);
+        let Some(info) = backup::info(&path) else {
+            self.backup_status("That backup can't be read. It may have been moved or damaged.".into(), true);
+            return self.refresh_backups();
+        };
+        let now = now_secs();
+        let snapshot = snapshots_dir().join(format!("before-restore-{now}.{}", backup::EXTENSION));
+        if let Err(e) = store.backup_to(&snapshot, &format!("Before restoring {}", info.name), now) {
+            return self.backup_status(format!("Nothing was restored: the safety snapshot failed ({e})."), true);
+        }
+        match store.restore_from(&path) {
+            Ok(n) => {
+                self.backup_status(
+                    format!("Restored {} from \u{201c}{}\u{201d}. Your previous clips are in Safety snapshots.", clips_label(n), info.name),
+                    false,
+                );
+            }
+            Err(e) => self.backup_status(format!("Nothing was restored: {e}"), true),
+        }
+        // Pruned after the restore, so restoring the oldest snapshot works.
+        backup::prune(&snapshots_dir(), backup::KEEP_SNAPSHOTS);
+        self.thumbs.clear();
+        self.marked.clear();
+        self.refresh();
+        self.refresh_backups();
+    }
+
+    fn delete_backup(&mut self, path: &str) {
+        let path = PathBuf::from(path);
+        // Only files in Wisp's own backup folders.
+        let parent = path.parent().map(|p| p.to_path_buf());
+        if parent == Some(backups_dir()) || parent == Some(snapshots_dir()) {
+            if let Err(e) = std::fs::remove_file(&path) {
+                self.backup_status(format!("Could not delete the backup: {e}"), true);
+            } else {
+                self.backup_status("Backup deleted.".into(), false);
+            }
+        }
+        self.refresh_backups();
+    }
+
     /// Show a file or image clip in File Explorer.
     fn reveal(&mut self, id: i64) {
         let Some(store) = self.store.as_ref() else { return };
@@ -512,6 +613,31 @@ impl App {
         if let Err(e) = self.settings.save(&self.settings_path) {
             window::warn("Wisp", &format!("Could not save settings:\n{e}"));
         }
+    }
+}
+
+fn backups_dir() -> PathBuf {
+    Settings::dir().join("Backups")
+}
+
+fn snapshots_dir() -> PathBuf {
+    backups_dir().join("Safety snapshots")
+}
+
+fn clips_label(n: usize) -> String {
+    if n == 1 {
+        "1 clip".into()
+    } else {
+        format!("{n} clips")
+    }
+}
+
+/// "just now", "5 min ago", "yesterday", "4 days ago".
+fn saved_ago(then: i64, now: i64) -> String {
+    match relative_time(then, now).as_str() {
+        "now" => "just now".into(),
+        "Yesterday" => "yesterday".into(),
+        t => format!("{t} ago"),
     }
 }
 
@@ -722,6 +848,15 @@ pub fn run() {
     popup.on_apply_hotkey(|t| with_app(|app| app.apply_hotkey(&t)));
     popup.on_clear_history(|| with_app(|app| app.clear_history()));
     popup.on_filter_changed(|| with_app(|app| app.refresh()));
+    popup.on_open_backups(|| with_app(|app| app.open_backups()));
+    popup.on_create_backup(|name| with_app(|app| app.create_backup(&name)));
+    popup.on_restore_backup(|p| with_app(|app| app.restore_backup(&p)));
+    popup.on_delete_backup(|p| with_app(|app| app.delete_backup(&p)));
+    popup.on_open_backups_folder(|| {
+        let dir = backups_dir();
+        let _ = std::fs::create_dir_all(&dir);
+        let _ = std::process::Command::new("explorer").arg(dir).spawn();
+    });
     popup.on_row_pressed(|i, shift, ctrl| with_app(|app| app.row_pressed(i.max(0) as usize, shift, ctrl)));
     popup.on_paste(|id, plain| with_app(|app| app.paste(id as i64, plain)));
     popup.on_toggle_pin(|id| with_app(|app| app.toggle_pin(id as i64)));

@@ -8,7 +8,7 @@ Built in Rust with a native [Slint](https://slint.dev) UI, no browser engine.
 
 ## Status
 
-Milestones 1 to 3 of 7:
+Milestones 1 to 3 and 5 of 7:
 
 - Records every copy: text, files and folders, and images (PNG or bitmap),
   with the app it came from. Repeat copies move to the top instead of
@@ -33,7 +33,22 @@ Milestones 1 to 3 of 7:
 - Start with Windows (per-user, no admin), on by default
 - Single instance: launching Wisp again opens the popup
 
-Next: backup and restore of named clip sets (milestone 5).
+Next: installer, update check and first release (milestone 7).
+
+## Backup and restore
+
+Settings → **Backup and restore…** (also in the tray menu) saves all clips,
+pinned ones and images included, under a name you choose, for example one set
+of snippets per project. Each backup is a single `.wispclips` file in
+`%APPDATA%\Wisp\Backups`; copy it to another computer's folder to move it.
+
+Restoring replaces all current clips with the backup. Wisp first saves the
+clips as they were to `Backups\Safety snapshots` (the newest 5 are kept), so a
+restore can be undone by restoring the snapshot.
+
+A `.wispclips` file is a SQLite database: the `clips` and `clip_files` tables
+as in `wisp.db`, `clip_images` with the PNG and thumbnail as blobs, and a
+`meta` table with the backup's name, time and format version.
 
 ## Keys in the popup
 
@@ -99,7 +114,7 @@ saved to `%APPDATA%\Wisp\settings.json`:
 ## Layout
 
 ```
-crates/wisp-core   clip storage, search, images, placement, settings; no Windows APIs, unit-tested anywhere
+crates/wisp-core   clip storage, search, backups, images, placement, settings; no Windows APIs, unit-tested anywhere
 crates/wisp-win    Win32: clipboard listener and paste, single instance, autostart, monitors, caret, focus
 crates/wisp-app    the executable: tray, hotkey, popup wiring
 ui/                Slint UI
