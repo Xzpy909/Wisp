@@ -1,0 +1,190 @@
+// Wisp popup. One component serves all three popup styles: Beam (centre or
+// at cursor) and Drawer differ only in size, position and a header row.
+
+component Kbd inherits Rectangle {
+    in property <string> key;
+    in property <color> ink;
+    in property <color> line;
+    border-width: 1px;
+    border-color: line;
+    border-radius: 4px;
+    height: 18px;
+    min-width: label.preferred-width + 10px;
+    label := Text {
+        text: root.key;
+        color: root.ink;
+        font-size: 10.5px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+    }
+}
+
+component Hint inherits HorizontalLayout {
+    in property <string> key;
+    in property <string> label;
+    in property <color> ink;
+    in property <color> muted;
+    in property <color> line;
+    spacing: 5px;
+    VerticalLayout {
+        alignment: center;
+        Kbd { key: root.key; ink: root.ink; line: root.line; }
+    }
+    Text { text: root.label; color: root.muted; font-size: 11.5px; vertical-alignment: center; }
+}
+
+export component Popup inherits Window {
+    in property <bool> drawer: false;
+    in property <bool> dark: false;
+    // True when Windows draws an acrylic backdrop behind the window.
+    in property <bool> translucent: false;
+    in property <string> style-label: "Beam, centre of screen";
+    in property <string> hotkey-label: "Alt+V";
+    in-out property <string> query: "";
+    callback dismiss();
+
+    public function focus-search() {
+        search.focus();
+    }
+
+    property <color> ink: root.dark ? #ececf0 : #141416;
+    property <color> muted: root.dark ? #a2a4ad : #5d5f66;
+    property <color> line: root.dark ? #ffffff1a : #00000017;
+    property <color> accent: #2f6bff;
+    property <color> panel: root.dark ? #202024 : #f9f9fb;
+
+    title: "Wisp";
+    no-frame: true;
+    always-on-top: true;
+    background: root.translucent ? transparent : root.panel;
+    default-font-size: 13px;
+    forward-focus: search;
+
+    FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                if (root.query != "") {
+                    root.query = "";
+                } else {
+                    root.dismiss();
+                }
+                return accept;
+            }
+            reject
+        }
+
+        Rectangle {
+            // A light tint over the acrylic keeps text contrast high.
+            background: root.translucent ? root.panel.with-alpha(0.55) : transparent;
+            border-width: 1px;
+            border-color: root.line;
+            border-radius: 8px;
+
+            VerticalLayout {
+                if root.drawer: HorizontalLayout {
+                    padding-left: 16px;
+                    padding-right: 16px;
+                    padding-top: 10px;
+                    height: 36px;
+                    Text { text: "Wisp"; font-weight: 600; color: root.ink; vertical-alignment: center; }
+                    Text {
+                        text: root.hotkey-label;
+                        color: root.muted;
+                        font-size: 11.5px;
+                        horizontal-alignment: right;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                }
+
+                HorizontalLayout {
+                    height: root.drawer ? 44px : 56px;
+                    padding-left: 16px;
+                    padding-right: 16px;
+                    spacing: 10px;
+                    VerticalLayout {
+                        alignment: center;
+                        Path {
+                            width: 16px;
+                            height: 16px;
+                            viewbox-width: 16;
+                            viewbox-height: 16;
+                            stroke: root.muted;
+                            stroke-width: 1.5px;
+                            fill: transparent;
+                            commands: "M 10.5 10.5 L 14.5 14.5 M 11.5 6.5 A 5 5 0 1 1 1.5 6.5 A 5 5 0 1 1 11.5 6.5";
+                        }
+                    }
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        search := TextInput {
+                            width: 100%;
+                            height: 100%;
+                            text <=> root.query;
+                            single-line: true;
+                            font-size: root.drawer ? 14px : 18px;
+                            color: root.ink;
+                            vertical-alignment: center;
+                            selection-background-color: root.accent.with-alpha(0.35);
+                        }
+                        Text {
+                            visible: root.query == "";
+                            width: 100%;
+                            height: 100%;
+                            text: "Search clipboard history";
+                            font-size: root.drawer ? 14px : 18px;
+                            color: root.muted;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                Rectangle { height: 1px; background: root.line; }
+
+                Rectangle {
+                    vertical-stretch: 1;
+                    VerticalLayout {
+                        alignment: center;
+                        padding: 24px;
+                        spacing: 6px;
+                        Text {
+                            text: root.query == "" ? "No clips yet" : "No clips match \"" + root.query + "\"";
+                            color: root.ink;
+                            font-size: 15px;
+                            font-weight: 600;
+                            horizontal-alignment: center;
+                            wrap: word-wrap;
+                        }
+                        Text {
+                            text: "Clipboard capture arrives in milestone 2. For now this window opens with " + root.hotkey-label + " and closes with Esc.";
+                            color: root.muted;
+                            horizontal-alignment: center;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+
+                Rectangle { height: 1px; background: root.line; }
+
+                HorizontalLayout {
+                    height: 32px;
+                    padding-left: 14px;
+                    padding-right: 14px;
+                    spacing: 14px;
+                    Hint { key: "Enter"; label: "Paste"; ink: root.ink; muted: root.muted; line: root.line; }
+                    Hint { key: "Tab"; label: "Filter"; ink: root.ink; muted: root.muted; line: root.line; }
+                    Hint { key: "Esc"; label: "Close"; ink: root.ink; muted: root.muted; line: root.line; }
+                    Text {
+                        horizontal-stretch: 1;
+                        text: root.drawer ? "" : root.style-label;
+                        color: root.muted;
+                        font-size: 11.5px;
+                        horizontal-alignment: right;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                }
+            }
+        }
+    }
+}
