@@ -4,6 +4,9 @@
 import { ListView, ScrollView, Switch, SpinBox, LineEdit, Button, Palette } from "std-widgets.slint";
 
 export struct ClipRow {
+    id: int,
+    // Part of a multiple selection (Shift+click, Ctrl+click).
+    marked: bool,
     kind: string,
     title: string,
     meta: string,
@@ -197,8 +200,14 @@ export component Popup inherits Window {
     in property <[ClipRow]> clips;
     in property <string> count-label;
     in-out property <int> selected: 0;
+    // How many clips are marked for a multiple selection.
+    in property <int> marked-count: 0;
     // 0 = clip list, 1 = settings.
     in-out property <int> page: 0;
+    // Type filter, cycled with Tab; same order as `Filter::ALL` in Rust.
+    in-out property <int> filter: 0;
+    property <[string]> filter-names: ["All", "Text", "Links", "Images", "Files", "Colours", "Code", "Pinned"];
+    property <[string]> filter-empty: ["", "No text yet", "No links yet", "No images yet", "No files yet", "No colours yet", "No code yet", "Nothing pinned yet"];
 
     // Settings, shown on the settings page.
     in-out property <int> style-index: 0;
@@ -219,6 +228,14 @@ export component Popup inherits Window {
     callback apply-hotkey(string);
     callback clear-history();
     callback open-data-folder();
+    // Clip actions, by clip id.
+    callback paste(int, bool);
+    callback toggle-pin(int);
+    callback forget(int);
+    callback reveal(int);
+    callback filter-changed();
+    // A row was clicked or reached with the arrows; Rust keeps the marks.
+    callback row-pressed(int, bool, bool);
 
     public function focus-search() {
         search.focus();
@@ -240,12 +257,28 @@ export component Popup inherits Window {
     property <color> sel: root.dark ? #5082ff38 : #2f6bff1f;
     property <color> panel: root.dark ? #202024 : #f9f9fb;
 
-    function move(delta: int) {
+    function set-filter(f: int) {
+        root.filter = Math.mod(f + root.filter-names.length, root.filter-names.length);
+        root.selected = 0;
+        list.content-y = 0;
+        root.filter-changed();
+    }
+
+    function selected-id() -> int {
+        return root.clips.length > root.selected ? root.clips[root.selected].id : -1;
+    }
+
+    function move(delta: int, extend: bool) {
         if (root.clips.length == 0) {
             return;
         }
         root.selected = Math.max(0, Math.min(root.clips.length - 1, root.selected + delta));
-        // Keep the selected row in view.
+        root.scroll-to-selected();
+        root.row-pressed(root.selected, extend, false);
+    }
+
+    // Keep the selected row in view.
+    public function scroll-to-selected() {
         if (root.selected * root.row-height + list.content-y < 0) {
             list.content-y = -root.selected * root.row-height;
         }
@@ -262,25 +295,66 @@ export component Popup inherits Window {
     forward-focus: search;
 
     FocusScope {
+        // Clip shortcuts are caught before the search field sees them.
+        capture-key-pressed(event) => {
+            if (root.page != 0) {
+                return reject;
+            }
+            if (event.text == Key.DownArrow || event.text == Key.UpArrow) {
+                root.move(event.text == Key.DownArrow ? 1 : -1, event.modifiers.shift);
+                return accept;
+            }
+            if (event.text == Key.Return || event.text == "\u{d}") {
+                if (root.selected-id() >= 0) {
+                    root.paste(root.selected-id(), event.modifiers.shift);
+                }
+                return accept;
+            }
+            if (event.text == Key.Tab && !event.modifiers.control) {
+                root.set-filter(root.filter + (event.modifiers.shift ? -1 : 1));
+                return accept;
+            }
+            if (event.text == Key.Backtab) {
+                root.set-filter(root.filter - 1);
+                return accept;
+            }
+            if (event.modifiers.control && !event.modifiers.alt) {
+                if (event.text == "p" || event.text == "P") {
+                    if (root.selected-id() >= 0) {
+                        root.toggle-pin(root.selected-id());
+                    }
+                    return accept;
+                }
+                if (event.text == Key.Delete) {
+                    if (root.selected-id() >= 0) {
+                        root.forget(root.selected-id());
+                    }
+                    return accept;
+                }
+                if (event.text == "o" || event.text == "O") {
+                    if (root.selected-id() >= 0) {
+                        root.reveal(root.selected-id());
+                    }
+                    return accept;
+                }
+            }
+            reject
+        }
         key-pressed(event) => {
             if (event.text == Key.Escape) {
                 if (root.page == 1) {
                     root.page = 0;
                     search.focus();
+                } else if (root.marked-count > 1) {
+                    root.row-pressed(root.selected, false, false);
                 } else if (root.query != "") {
                     root.query = "";
                     root.query-edited("");
+                } else if (root.filter != 0) {
+                    root.set-filter(0);
                 } else {
                     root.dismiss();
                 }
-                return accept;
-            }
-            if (root.page == 0 && event.text == Key.DownArrow) {
-                root.move(1);
-                return accept;
-            }
-            if (root.page == 0 && event.text == Key.UpArrow) {
-                root.move(-1);
                 return accept;
             }
             reject
@@ -383,11 +457,45 @@ export component Popup inherits Window {
                             visible: root.page == 1 || root.query == "";
                             width: 100%;
                             height: 100%;
-                            text: root.page == 1 ? "Settings" : "Search clipboard history";
+                            text: root.page == 1 ? "Settings"
+                                : root.filter == 0 ? "Search clipboard history"
+                                : "Search " + root.filter-names[root.filter].to-lowercase();
                             font-size: root.drawer ? 14px : 18px;
                             font-weight: root.page == 1 ? 600 : 400;
                             color: root.page == 1 ? root.ink : root.muted;
                             vertical-alignment: center;
+                        }
+                    }
+                    // The active type filter; click to show everything again.
+                    if root.page == 0 && root.filter != 0: VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            height: 24px;
+                            width: pill-text.preferred-width + 38px;
+                            border-radius: 12px;
+                            background: pill.has-hover ? root.accent.with-alpha(0.32) : root.accent.with-alpha(0.2);
+                            pill-text := Text {
+                                x: 10px;
+                                text: root.filter-names[root.filter];
+                                color: root.ink;
+                                font-size: 12px;
+                                vertical-alignment: center;
+                            }
+                            Path {
+                                x: parent.width - 20px;
+                                width: 8px;
+                                height: 8px;
+                                y: (parent.height - self.height) / 2;
+                                viewbox-width: 8;
+                                viewbox-height: 8;
+                                stroke: root.ink;
+                                stroke-width: 1.2px;
+                                commands: "M 0.5 0.5 L 7.5 7.5 M 7.5 0.5 L 0.5 7.5";
+                            }
+                            pill := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.set-filter(0); search.focus(); }
+                            }
                         }
                     }
                     if !root.drawer: VerticalLayout {
@@ -421,7 +529,7 @@ export component Popup inherits Window {
                                 x: 4px;
                                 width: parent.width - 8px;
                                 border-radius: 6px;
-                                background: i == root.selected ? root.sel : (hover.has-hover ? #8080800f : transparent);
+                                background: i == root.selected || row.marked ? root.sel : (hover.has-hover ? #8080800f : transparent);
                                 Rectangle {
                                     visible: i == root.selected;
                                     x: 0;
@@ -464,8 +572,43 @@ export component Popup inherits Window {
                                         horizontal-stretch: 0;
                                     }
                                 }
-                                hover := TouchArea {
-                                    clicked => { root.selected = i; search.focus(); }
+                                ContextMenuArea {
+                                    width: 100%;
+                                    height: 100%;
+                                    hover := TouchArea {
+                                        pointer-event(e) => {
+                                            if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) {
+                                                root.row-pressed(i, e.modifiers.shift, e.modifiers.control);
+                                                search.focus();
+                                            }
+                                        }
+                                        double-clicked => { root.paste(row.id, false); }
+                                    }
+                                    Menu {
+                                        MenuItem {
+                                            title: row.marked && root.marked-count > 1 ? "Paste " + root.marked-count + " clips" : "Paste";
+                                            activated => { root.paste(row.id, false); }
+                                        }
+                                        MenuItem {
+                                            title: "Paste as plain text";
+                                            activated => { root.paste(row.id, true); }
+                                        }
+                                        MenuSeparator { }
+                                        MenuItem {
+                                            title: row.pinned ? "Unpin" : "Pin";
+                                            activated => { root.toggle-pin(row.id); }
+                                        }
+                                        MenuItem {
+                                            title: "Show in File Explorer";
+                                            enabled: row.kind == "files" || row.kind == "image";
+                                            activated => { root.reveal(row.id); }
+                                        }
+                                        MenuSeparator { }
+                                        MenuItem {
+                                            title: row.marked && root.marked-count > 1 ? "Forget " + root.marked-count + " clips" : "Forget";
+                                            activated => { root.forget(row.id); }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -477,7 +620,9 @@ export component Popup inherits Window {
                         padding: 24px;
                         spacing: 6px;
                         Text {
-                            text: root.query == "" ? "No clips yet" : "No clips match \"" + root.query + "\"";
+                            text: root.query != "" ? "No clips match \"" + root.query + "\""
+                                : root.filter != 0 ? root.filter-empty[root.filter]
+                                : "No clips yet";
                             color: root.ink;
                             font-size: 15px;
                             font-weight: 600;
@@ -485,7 +630,9 @@ export component Popup inherits Window {
                             wrap: word-wrap;
                         }
                         Text {
-                            text: root.query == "" ? "Copy some text, a file or an image and it shows up here." : "Try fewer letters, or press Esc to clear.";
+                            text: root.query != "" ? "Try fewer letters, or press Esc to clear."
+                                : root.filter != 0 ? "Press Tab for another type, or Esc to show all."
+                                : "Copy some text, a file or an image and it shows up here.";
                             color: root.muted;
                             horizontal-alignment: center;
                             wrap: word-wrap;
@@ -627,6 +774,24 @@ export component Popup inherits Window {
                             }
 
                             Rectangle { height: 1px; background: root.line; }
+                            Section { text: "Keys"; color: root.ink; }
+                            for k in [
+                                { key: "Enter", what: "Paste into the app you were in" },
+                                { key: "Shift+Enter", what: "Paste as plain text (files as their paths)" },
+                                { key: "Shift+click, Ctrl+click", what: "Select several clips (also Shift+↑↓); Enter pastes them together" },
+                                { key: "Right-click", what: "Paste, pin or unpin, show in File Explorer, forget" },
+                                { key: "Tab, Shift+Tab", what: "Show only text, links, images, files, colours, code or pinned" },
+                                { key: "Ctrl+P", what: "Pin or unpin. Pinned clips stay on top and are never removed" },
+                                { key: "Ctrl+Delete", what: "Forget the clip" },
+                                { key: "Ctrl+O", what: "Show a file or image clip in File Explorer" },
+                                { key: "Esc", what: "Clear the search, then the filter, then close" },
+                            ]: HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: k.key; color: root.ink; font-weight: 600; width: root.drawer ? 92px : 110px; wrap: word-wrap; }
+                                Text { text: k.what; color: root.muted; wrap: word-wrap; horizontal-stretch: 1; }
+                            }
+
+                            Rectangle { height: 1px; background: root.line; }
                             Section { text: "System"; color: root.ink; }
                             SwitchRow {
                                 text: "Start with Windows";
@@ -650,12 +815,15 @@ export component Popup inherits Window {
                     padding-left: 14px;
                     padding-right: 14px;
                     spacing: 14px;
-                    if root.page == 0: Hint { key: "↑↓"; label: "Move"; ink: root.ink; muted: root.muted; line: root.line; }
-                    if root.page == 0: Hint { key: "Esc"; label: "Clear, close"; ink: root.ink; muted: root.muted; line: root.line; }
+                    if root.page == 0: Hint { key: "↵"; label: "Paste"; ink: root.ink; muted: root.muted; line: root.line; }
+                    if root.page == 0: Hint { key: "Tab"; label: "Filter"; ink: root.ink; muted: root.muted; line: root.line; }
+                    if root.page == 0 && !root.drawer: Hint { key: "Ctrl+P"; label: "Pin"; ink: root.ink; muted: root.muted; line: root.line; }
+                    if root.page == 0 && !root.drawer: Hint { key: "Ctrl+Del"; label: "Forget"; ink: root.ink; muted: root.muted; line: root.line; }
+                    if root.page == 0 && root.drawer: Hint { key: "Esc"; label: "Close"; ink: root.ink; muted: root.muted; line: root.line; }
                     if root.page == 1: Hint { key: "Esc"; label: "Back to clips"; ink: root.ink; muted: root.muted; line: root.line; }
                     Text {
                         horizontal-stretch: 1;
-                        text: root.count-label;
+                        text: root.page == 0 && root.marked-count > 1 ? root.marked-count + " selected · " + root.count-label : root.count-label;
                         color: root.muted;
                         font-size: 11.5px;
                         horizontal-alignment: right;

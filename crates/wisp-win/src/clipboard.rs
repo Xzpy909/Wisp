@@ -158,8 +158,11 @@ fn read_clipboard(hwnd: HWND, opts: &CaptureOptions) -> Option<Captured> {
     let can_include = format("CanIncludeInClipboardHistory");
     let png_fmt = format("PNG");
 
+    let own = format(crate::paste::OWN_FORMAT);
+
     let _guard = open(hwnd)?;
-    if available(exclude) || available(viewer_ignore) {
+    // Wisp's own paste: the clip is already in history.
+    if available(own) || available(exclude) || available(viewer_ignore) {
         return None;
     }
     if available(can_include) {

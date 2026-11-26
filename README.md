@@ -8,7 +8,7 @@ Built in Rust with a native [Slint](https://slint.dev) UI, no browser engine.
 
 ## Status
 
-Milestones 1 and 2 of 7:
+Milestones 1 to 3 of 7:
 
 - Records every copy: text, files and folders, and images (PNG or bitmap),
   with the app it came from. Repeat copies move to the top instead of
@@ -16,8 +16,12 @@ Milestones 1 and 2 of 7:
 - History in SQLite (`%APPDATA%\Wisp\wisp.db`), images and thumbnails as PNG
   files beside it. Old clips are removed after 30 days or beyond 5,000 clips
   (both adjustable); pinned clips are always kept.
-- `Alt+V` opens the popup with the newest clips; type to filter, arrows to move,
-  Esc to clear and close
+- `Alt+V` opens the popup with the newest clips. Type to search: every word
+  must appear, as a substring or as its letters in order ("inv pd" finds
+  "Invoice paid"), best matches first. The first 4,096 characters of each clip
+  are searched.
+- Enter pastes the selected clip into the app you were in; the clip moves to
+  the top of the history
 - Settings inside the popup (gear button next to close): popup style, glass
   effect, shortcut, history limits, what to record, Start with Windows, clear
   history
@@ -29,7 +33,23 @@ Milestones 1 and 2 of 7:
 - Start with Windows (per-user, no admin), on by default
 - Single instance: launching Wisp again opens the popup
 
-Paste (Enter) and fuzzy search arrive in milestone 3.
+Next: backup and restore of named clip sets (milestone 5).
+
+## Keys in the popup
+
+| Key | Action |
+| --- | --- |
+| Type | Search |
+| ↑ ↓ | Move the selection |
+| Enter, double-click | Paste into the app you were in |
+| Shift+Enter | Paste as plain text (files as their paths) |
+| Shift+click, Ctrl+click, Shift+↑↓ | Select several clips; Enter pastes them together (text one per line, files as files) and Ctrl+P, Ctrl+Delete act on all of them |
+| Right-click | Menu: Paste, Paste as plain text, Pin or Unpin, Show in File Explorer, Forget |
+| Tab, Shift+Tab | Show only text, links, images, files, colours, code or pinned clips |
+| Ctrl+P | Pin or unpin; pinned clips stay on top and are never removed |
+| Ctrl+Delete | Forget the clip |
+| Ctrl+O | Show a file or image clip in File Explorer |
+| Esc | Clear the search, then the filter, then close |
 
 ## Build and run
 
@@ -79,8 +99,8 @@ saved to `%APPDATA%\Wisp\settings.json`:
 ## Layout
 
 ```
-crates/wisp-core   clip storage, images, placement, settings; no Windows APIs, unit-tested anywhere
-crates/wisp-win    Win32: clipboard listener, single instance, autostart, monitors, caret, focus
+crates/wisp-core   clip storage, search, images, placement, settings; no Windows APIs, unit-tested anywhere
+crates/wisp-win    Win32: clipboard listener and paste, single instance, autostart, monitors, caret, focus
 crates/wisp-app    the executable: tray, hotkey, popup wiring
 ui/                Slint UI
 docs/design/       interactive prototypes of the four popup concepts

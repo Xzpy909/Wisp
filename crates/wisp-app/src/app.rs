@@ -13,15 +13,15 @@ use global_hotkey::hotkey::HotKey;
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use slint::{
-    ComponentHandle, Image, PhysicalPosition, PhysicalSize, Rgba8Pixel, SharedPixelBuffer, Timer, TimerMode,
+    ComponentHandle, Image, Model, PhysicalPosition, PhysicalSize, Rgba8Pixel, SharedPixelBuffer, Timer, TimerMode,
     VecModel,
 };
 use tray_icon::menu::MenuEvent;
 use tray_icon::{MouseButton, MouseButtonState, TrayIconEvent};
-use wisp_core::clip::{now_secs, relative_time};
-use wisp_core::{images, popup_rect, Clip, Kind, PopupStyle, Settings, Store};
+use wisp_core::clip::{combine, now_secs, relative_time};
+use wisp_core::{images, popup_rect, Clip, ClipContent, Filter, Kind, PopupStyle, Settings, Store};
 use wisp_win::clipboard::{self, CaptureOptions};
-use wisp_win::{autostart, instance, screen, window, Hwnd};
+use wisp_win::{autostart, instance, paste, screen, window, Hwnd};
 
 /// Most clips the popup lists at once.
 const LIST_LIMIT: usize = 200;
@@ -69,6 +69,9 @@ struct App {
     capture: Arc<CaptureOptions>,
     retention: Arc<Retention>,
     thumbs: HashMap<i64, Image>,
+    /// Clips in a multiple selection, and the row Shift+click extends from.
+    marked: Vec<i64>,
+    anchor: usize,
 }
 
 impl App {
@@ -106,6 +109,9 @@ impl App {
 
         self.popup.set_drawer(style == PopupStyle::Drawer);
         self.popup.set_query("".into());
+        self.popup.set_filter(0);
+        self.marked.clear();
+        self.anchor = 0;
         self.popup.set_page(0);
         self.popup.set_selected(0);
         self.popup.set_dark(window::apps_use_dark_theme());
@@ -165,7 +171,8 @@ impl App {
         let mut seen_focus = false;
         self.focus_watch.start(TimerMode::Repeated, Duration::from_millis(120), move || {
             let fg = window::foreground_window();
-            if fg == hwnd {
+            // Wisp's own windows (the right-click menu) don't count as leaving.
+            if fg == hwnd || window::is_own_window(fg) {
                 seen_focus = true;
             } else if seen_focus {
                 on_ui(|app| app.hide(false));
@@ -223,11 +230,12 @@ impl App {
         }
     }
 
-    /// Reload the clip list for the current search text.
+    /// Reload the clip list for the current search text and filter.
     fn refresh(&mut self) {
         let Some(store) = self.store.as_ref() else { return };
         let query = self.popup.get_query().to_string();
-        let clips = store.search(&query, LIST_LIMIT).unwrap_or_default();
+        let filter = Filter::from_index(self.popup.get_filter());
+        let (clips, matches) = store.search(&query, filter, LIST_LIMIT).unwrap_or_default();
         let total = store.count().unwrap_or(0);
         let now = now_secs();
         if self.thumbs.len() > 4 * LIST_LIMIT {
@@ -237,18 +245,160 @@ impl App {
             .iter()
             .map(|c| clip_row(c, now, store, &mut self.thumbs))
             .collect();
-        let shown = rows.len();
-        self.popup.set_clips(Rc::new(VecModel::from(rows)).into());
-        if self.popup.get_selected() as usize >= shown {
-            self.popup.set_selected(0);
+        // Marks survive a refresh for clips still listed.
+        let mut rows = rows;
+        self.marked.retain(|id| rows.iter().any(|r| r.id as i64 == *id));
+        for r in &mut rows {
+            r.marked = self.marked.contains(&(r.id as i64));
         }
-        let label = match (query.trim().is_empty(), total) {
+        self.popup.set_marked_count(self.marked.len() as i32);
+        let shown = rows.len() as i32;
+        self.popup.set_clips(Rc::new(VecModel::from(rows)).into());
+        if self.popup.get_selected() >= shown {
+            self.popup.set_selected((shown - 1).max(0));
+        }
+        let narrowed = !query.trim().is_empty() || filter != Filter::All;
+        let label = match (narrowed, total) {
             (_, 0) => String::new(),
-            (true, 1) => "1 clip".into(),
-            (true, n) => format!("{n} clips"),
-            (false, n) => format!("{shown} of {n}"),
+            (false, 1) => "1 clip".into(),
+            (false, n) => format!("{n} clips"),
+            (true, n) => format!("{matches} of {n}"),
         };
         self.popup.set_count_label(label.into());
+    }
+
+    /// Select the row showing clip `id`, if it is listed.
+    fn select_clip(&self, id: i64) {
+        if let Some(i) = self.popup.get_clips().iter().position(|r| r.id as i64 == id) {
+            self.popup.set_selected(i as i32);
+        }
+    }
+
+    /// A row was clicked (or reached with the arrow keys): a plain press
+    /// selects just that row, Ctrl adds or removes it, Shift selects the
+    /// range from the last plain or Ctrl press.
+    fn row_pressed(&mut self, index: usize, shift: bool, ctrl: bool) {
+        let model = self.popup.get_clips();
+        let ids: Vec<i64> = model.iter().map(|r| r.id as i64).collect();
+        let Some(&id) = ids.get(index) else { return };
+        let current = self.popup.get_selected() as usize;
+        if shift {
+            let (a, b) = (self.anchor.min(index), self.anchor.max(index));
+            self.marked = ids.get(a..=b.min(ids.len() - 1)).unwrap_or_default().to_vec();
+        } else if ctrl {
+            if self.marked.is_empty() {
+                if let Some(&cur) = ids.get(current) {
+                    self.marked.push(cur);
+                }
+            }
+            if let Some(pos) = self.marked.iter().position(|m| *m == id) {
+                self.marked.remove(pos);
+            } else {
+                self.marked.push(id);
+            }
+            self.anchor = index;
+        } else {
+            self.marked.clear();
+            self.anchor = index;
+        }
+        self.popup.set_selected(index as i32);
+        self.sync_marks();
+    }
+
+    fn sync_marks(&self) {
+        let model = self.popup.get_clips();
+        for i in 0..model.row_count() {
+            if let Some(mut r) = model.row_data(i) {
+                let m = self.marked.contains(&(r.id as i64));
+                if r.marked != m {
+                    r.marked = m;
+                    model.set_row_data(i, r);
+                }
+            }
+        }
+        self.popup.set_marked_count(self.marked.len() as i32);
+    }
+
+    /// The clips an action on `id` applies to: the whole multiple selection
+    /// when `id` is part of it, otherwise just `id`. In list order.
+    fn targets(&self, id: i64) -> Vec<i64> {
+        if self.marked.len() > 1 && self.marked.contains(&id) {
+            self.popup.get_clips().iter().map(|r| r.id as i64).filter(|i| self.marked.contains(i)).collect()
+        } else {
+            vec![id]
+        }
+    }
+
+    /// Put the clip (or the selected clips, together) on the clipboard,
+    /// return to the previous app and press Ctrl+V there. Pasted clips move
+    /// to the top of the history.
+    fn paste(&mut self, id: i64, plain: bool) {
+        let ids = self.targets(id);
+        let Some(store) = self.store.as_ref() else { return };
+        let mut contents = Vec::new();
+        for &i in &ids {
+            match store.content(i) {
+                Ok(Some(c)) => contents.push(c),
+                Ok(None) => {}
+                Err(e) => return window::warn("Wisp", &format!("Could not read the clip:\n{e}")),
+            }
+        }
+        let Some(content) = combine(contents, plain) else { return self.refresh() };
+        if let Err(e) = paste::write(&content, plain) {
+            return window::warn("Wisp", &format!("Could not put the clip on the clipboard: {e}."));
+        }
+        let now = now_secs();
+        for &i in ids.iter().rev() {
+            let _ = store.touch(i, now);
+        }
+        self.hide(true);
+        paste_when_keys_released(0);
+    }
+
+    fn toggle_pin(&mut self, id: i64) {
+        let ids = self.targets(id);
+        let Some(store) = self.store.as_ref() else { return };
+        // Pin all unless all are pinned already.
+        let all_pinned = self
+            .popup
+            .get_clips()
+            .iter()
+            .filter(|r| ids.contains(&(r.id as i64)))
+            .all(|r| r.pinned);
+        for &i in &ids {
+            let _ = store.set_pinned(i, !all_pinned);
+        }
+        self.refresh();
+        self.select_clip(id);
+        self.popup.invoke_scroll_to_selected();
+    }
+
+    fn forget(&mut self, id: i64) {
+        let ids = self.targets(id);
+        let Some(store) = self.store.as_ref() else { return };
+        for &i in &ids {
+            if let Err(e) = store.delete(i) {
+                window::warn("Wisp", &format!("Could not forget the clip:\n{e}"));
+                break;
+            }
+            self.thumbs.remove(&i);
+        }
+        self.marked.clear();
+        self.refresh();
+    }
+
+    /// Show a file or image clip in File Explorer.
+    fn reveal(&mut self, id: i64) {
+        let Some(store) = self.store.as_ref() else { return };
+        let path = match store.content(id) {
+            Ok(Some(ClipContent::Files(paths))) => paths.into_iter().next(),
+            Ok(Some(ClipContent::Image { .. })) => store.image_path(id).ok().flatten(),
+            _ => None,
+        };
+        if let Some(p) = path {
+            self.hide(false);
+            paste::reveal(&p);
+        }
     }
 
     /// A new clip was recorded on the clipboard thread.
@@ -365,6 +515,18 @@ impl App {
     }
 }
 
+/// Press Ctrl+V once the keys of the shortcut used to paste (Shift from
+/// Shift+Enter, say) are up, so the app sees exactly Ctrl+V. Waits at most
+/// about half a second, then releases them itself.
+fn paste_when_keys_released(tries: u32) {
+    if paste::modifiers_held() && tries < 30 {
+        Timer::single_shot(Duration::from_millis(15), move || paste_when_keys_released(tries + 1));
+    } else {
+        // Give the previous window a moment to take focus back.
+        Timer::single_shot(Duration::from_millis(40), paste::send_ctrl_v);
+    }
+}
+
 fn native_handle(popup: &Popup) -> Option<Hwnd> {
     let handle = popup.window().window_handle();
     match handle.window_handle().ok()?.as_raw() {
@@ -400,6 +562,8 @@ fn clip_row(c: &Clip, now: i64, store: &Store, thumbs: &mut HashMap<i64, Image>)
     }
     meta.push_str(&relative_time(c.created_at, now));
     ClipRow {
+        id: c.id as i32,
+        marked: false,
         kind: c.kind.as_str().into(),
         title: c.title().into(),
         meta: meta.into(),
@@ -557,6 +721,12 @@ pub fn run() {
     });
     popup.on_apply_hotkey(|t| with_app(|app| app.apply_hotkey(&t)));
     popup.on_clear_history(|| with_app(|app| app.clear_history()));
+    popup.on_filter_changed(|| with_app(|app| app.refresh()));
+    popup.on_row_pressed(|i, shift, ctrl| with_app(|app| app.row_pressed(i.max(0) as usize, shift, ctrl)));
+    popup.on_paste(|id, plain| with_app(|app| app.paste(id as i64, plain)));
+    popup.on_toggle_pin(|id| with_app(|app| app.toggle_pin(id as i64)));
+    popup.on_forget(|id| with_app(|app| app.forget(id as i64)));
+    popup.on_reveal(|id| with_app(|app| app.reveal(id as i64)));
     popup.on_open_data_folder(|| {
         let _ = std::process::Command::new("explorer").arg(Settings::dir()).spawn();
     });
@@ -597,6 +767,8 @@ pub fn run() {
             capture,
             retention,
             thumbs: HashMap::new(),
+            marked: Vec::new(),
+            anchor: 0,
         })
     });
     with_app(|app| app.apply_capture_settings());

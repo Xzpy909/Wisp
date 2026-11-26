@@ -3,6 +3,7 @@
 
 use crate::clip::{classify, content_hash, Captured, Clip, ClipContent, Kind};
 use crate::images;
+use crate::search::{Filter, Query, SEARCH_CHARS};
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use std::path::{Path, PathBuf};
 
@@ -36,7 +37,9 @@ CREATE TABLE IF NOT EXISTS clip_images (
 ";
 
 const SELECT_CLIP: &str = "
-SELECT c.id, c.kind, c.text, c.source_app, c.created_at, c.pinned, c.size_bytes,
+SELECT c.id, c.kind,
+       CASE WHEN c.kind = 'files' THEN c.text ELSE substr(c.text, 1, 4096) END,
+       c.source_app, c.created_at, c.pinned, c.size_bytes,
        i.width, i.height, i.thumb_name
 FROM clips c LEFT JOIN clip_images i ON i.clip_id = c.id";
 
@@ -177,30 +180,98 @@ impl Store {
         Ok(id)
     }
 
-    /// Newest first, pinned clips on top.
+    /// Newest first, pinned clips on top. Text is cut to its first
+    /// [`SEARCH_CHARS`] characters; [`Store::content`] has the whole clip.
     pub fn recent(&self, limit: usize) -> Result<Vec<Clip>> {
-        let sql = format!("{SELECT_CLIP} ORDER BY c.pinned DESC, c.created_at DESC, c.id DESC LIMIT ?1");
+        self.list(Filter::All, limit)
+    }
+
+    fn list(&self, filter: Filter, limit: usize) -> Result<Vec<Clip>> {
+        let sql = format!(
+            "{SELECT_CLIP} WHERE {} ORDER BY c.pinned DESC, c.created_at DESC, c.id DESC LIMIT ?1",
+            filter.sql()
+        );
         let mut st = self.conn.prepare_cached(&sql)?;
         let rows = st.query_map([limit as i64], row_to_clip)?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
-    /// Case-insensitive substring search over text, file paths and source
-    /// app. (Fuzzy, ranked search replaces this in milestone 3.)
-    pub fn search(&self, query: &str, limit: usize) -> Result<Vec<Clip>> {
-        let q = query.trim();
+    /// Clips of the `filter` type matching `query`, best match first (newer
+    /// first among equals). An empty query lists the newest clips. Returns
+    /// the clips and how many matched in total.
+    pub fn search(&self, query: &str, filter: Filter, limit: usize) -> Result<(Vec<Clip>, usize)> {
+        let q = Query::new(query);
         if q.is_empty() {
-            return self.recent(limit);
+            let clips = self.list(filter, limit)?;
+            let total = self.conn.query_row(
+                &format!("SELECT COUNT(*) FROM clips c WHERE {}", filter.sql()),
+                [],
+                |r| r.get::<_, i64>(0),
+            )? as usize;
+            return Ok((clips, total));
         }
-        let escaped = q.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
-        let pattern = format!("%{escaped}%");
-        let sql = format!(
-            "{SELECT_CLIP} WHERE c.text LIKE ?1 ESCAPE '\\' OR c.source_app LIKE ?1 ESCAPE '\\'
-             ORDER BY c.pinned DESC, c.created_at DESC, c.id DESC LIMIT ?2"
-        );
+        let sql = format!("{SELECT_CLIP} WHERE {} ORDER BY c.created_at DESC, c.id DESC", filter.sql());
         let mut st = self.conn.prepare_cached(&sql)?;
-        let rows = st.query_map(params![pattern, limit as i64], row_to_clip)?;
-        Ok(rows.collect::<rusqlite::Result<_>>()?)
+        let mut rows = st.query([])?;
+        let mut hits: Vec<(u32, Clip)> = Vec::new();
+        let mut hay = String::new();
+        while let Some(row) = rows.next()? {
+            let clip = row_to_clip(row)?;
+            // Text first, then the app it came from, so "notepad" finds
+            // everything copied in Notepad.
+            hay.clear();
+            hay.extend(clip.text.chars().take(SEARCH_CHARS));
+            hay.push('\n');
+            hay.push_str(clip.source_app.as_deref().unwrap_or(""));
+            if let Some(score) = q.score(&hay) {
+                hits.push((score, clip));
+            }
+        }
+        let total = hits.len();
+        // Stable sort keeps newest first among equal scores.
+        hits.sort_by_key(|h| std::cmp::Reverse(h.0));
+        hits.truncate(limit);
+        Ok((hits.into_iter().map(|h| h.1).collect(), total))
+    }
+
+    /// The whole content of a clip, for pasting.
+    pub fn content(&self, id: i64) -> Result<Option<ClipContent>> {
+        let row: Option<(String, String)> = self
+            .conn
+            .query_row("SELECT kind, text FROM clips WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?)))
+            .optional()?;
+        let Some((kind, text)) = row else { return Ok(None) };
+        Ok(Some(match Kind::parse(&kind) {
+            Kind::Files => {
+                let mut st = self.conn.prepare_cached("SELECT path FROM clip_files WHERE clip_id = ?1 ORDER BY rowid")?;
+                let paths = st.query_map([id], |r| r.get::<_, String>(0))?;
+                ClipContent::Files(paths.map(|p| p.map(PathBuf::from)).collect::<rusqlite::Result<_>>()?)
+            }
+            Kind::Image => {
+                let (file, width, height): (String, u32, u32) = self.conn.query_row(
+                    "SELECT file_name, width, height FROM clip_images WHERE clip_id = ?1",
+                    [id],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )?;
+                ClipContent::Image { png: std::fs::read(self.images_dir.join(file))?, width, height }
+            }
+            _ => ClipContent::Text(text),
+        }))
+    }
+
+    /// Full path of an image clip's PNG file.
+    pub fn image_path(&self, id: i64) -> Result<Option<PathBuf>> {
+        let name: Option<String> = self
+            .conn
+            .query_row("SELECT file_name FROM clip_images WHERE clip_id = ?1", [id], |r| r.get(0))
+            .optional()?;
+        Ok(name.map(|n| self.images_dir.join(n)))
+    }
+
+    /// Move a clip to the top, e.g. after it was pasted.
+    pub fn touch(&self, id: i64, now: i64) -> Result<()> {
+        self.conn.execute("UPDATE clips SET created_at = ?2, last_used_at = ?2 WHERE id = ?1", params![id, now])?;
+        Ok(())
     }
 
     pub fn count(&self) -> Result<i64> {
@@ -339,7 +410,8 @@ mod tests {
             source_app: Some("explorer".into()),
         };
         s.insert(&cap, 1).unwrap();
-        let hits = s.search("mirelle", 10).unwrap();
+        let (hits, total) = s.search("mirelle", Filter::All, 10).unwrap();
+        assert_eq!(total, 1);
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].kind, Kind::Files);
         assert_eq!(hits[0].title(), "Mirelle notes.txt and 1 more");
@@ -361,15 +433,61 @@ mod tests {
     }
 
     #[test]
-    fn search_is_case_insensitive_and_escapes_wildcards() {
+    fn search_is_case_insensitive_and_literal() {
         let (s, dir) = temp_store();
         s.insert(&text("Invoice 100% paid"), 1).unwrap();
         s.insert(&text("invoice draft"), 2).unwrap();
         s.insert(&text("unrelated"), 3).unwrap();
-        assert_eq!(s.search("INVOICE", 10).unwrap().len(), 2);
-        assert_eq!(s.search("100%", 10).unwrap().len(), 1);
-        assert_eq!(s.search("_", 10).unwrap().len(), 0);
-        assert_eq!(s.search("notepad", 10).unwrap().len(), 3);
+        let n = |q: &str| s.search(q, Filter::All, 10).unwrap().1;
+        assert_eq!(n("INVOICE"), 2);
+        assert_eq!(n("100%"), 1);
+        assert_eq!(n("_"), 0);
+        assert_eq!(n("notepad"), 3);
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn search_ranks_best_match_first_and_filters() {
+        let (s, dir) = temp_store();
+        s.insert(&text("a note about moonforge pricing"), 1).unwrap();
+        s.insert(&text("Moonforge"), 2).unwrap();
+        s.insert(&text("https://moonforge.example"), 3).unwrap();
+        s.insert(&text("unrelated"), 4).unwrap();
+        let (hits, total) = s.search("moonforge", Filter::All, 10).unwrap();
+        assert_eq!(total, 3);
+        assert_eq!(hits[0].text, "Moonforge");
+        let (links, _) = s.search("moon", Filter::Links, 10).unwrap();
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].kind, Kind::Url);
+        let (all_links, total) = s.search("", Filter::Links, 10).unwrap();
+        assert_eq!((all_links.len(), total), (1, 1));
+        let id = s.insert(&text("unrelated"), 5).unwrap();
+        s.set_pinned(id, true).unwrap();
+        assert_eq!(s.search("", Filter::Pinned, 10).unwrap().1, 1);
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn content_returns_whole_clip_and_touch_moves_it_up() {
+        let (s, dir) = temp_store();
+        let long = "Starfall ".repeat(1000);
+        let a = s.insert(&text(&long), 1).unwrap();
+        s.insert(&text("newer"), 2).unwrap();
+        assert_eq!(s.recent(1).unwrap()[0].text, "newer");
+        assert!(s.recent(5).unwrap()[1].text.chars().count() <= SEARCH_CHARS);
+        assert_eq!(s.content(a).unwrap(), Some(ClipContent::Text(long)));
+        s.touch(a, 3).unwrap();
+        assert_eq!(s.recent(1).unwrap()[0].id, a);
+
+        let files = vec![PathBuf::from("C:\\Work\\b.txt"), PathBuf::from("C:\\Work\\a.txt")];
+        let f = s.insert(&Captured { content: ClipContent::Files(files.clone()), source_app: None }, 4).unwrap();
+        assert_eq!(s.content(f).unwrap(), Some(ClipContent::Files(files)));
+
+        let cap = png(4, 2);
+        let i = s.insert(&cap, 5).unwrap();
+        assert_eq!(s.content(i).unwrap(), Some(cap.content));
+        assert!(s.image_path(i).unwrap().unwrap().exists());
+        assert_eq!(s.content(9999).unwrap(), None);
         std::fs::remove_dir_all(dir).ok();
     }
 
