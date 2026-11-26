@@ -112,23 +112,12 @@ impl App {
         self.settings_to_ui();
         self.refresh();
 
+        self.prewarm();
         let w = self.popup.window();
         w.set_position(PhysicalPosition::new(r.x, r.y));
         w.set_size(PhysicalSize::new(r.w as u32, r.h as u32));
         if self.popup.show().is_err() {
             return;
-        }
-        // The native window exists only after the first show.
-        if self.hwnd.is_none() {
-            self.hwnd = native_handle(&self.popup);
-            if let Some(h) = self.hwnd {
-                let software = match std::env::var("SLINT_BACKEND") {
-                    Ok(b) => b.contains("software"),
-                    Err(_) => !self.settings.glass_effect,
-                };
-                let acrylic = !software && window::apply_acrylic(h);
-                self.popup.set_translucent(acrylic);
-            }
         }
         // Position again: moving between monitors with different DPI can
         // make the toolkit adjust the size on the way.
@@ -141,6 +130,33 @@ impl App {
             self.watch_focus(h);
         }
         self.popup.invoke_focus_search();
+    }
+
+    /// Create the native window once, off screen, and style it (tool window,
+    /// rounded corners, acrylic) before it is ever visible. Without this the
+    /// very first open showed an opaque grey frame instead of the glass.
+    fn prewarm(&mut self) {
+        if self.hwnd.is_some() {
+            return;
+        }
+        let software = match std::env::var("SLINT_BACKEND") {
+            Ok(b) => b.contains("software"),
+            Err(_) => !self.settings.glass_effect,
+        };
+        self.popup.set_translucent(!software);
+        let w = self.popup.window();
+        w.set_position(PhysicalPosition::new(-32000, -32000));
+        w.set_size(PhysicalSize::new(64, 64));
+        if self.popup.show().is_err() {
+            return;
+        }
+        self.hwnd = native_handle(&self.popup);
+        if let Some(h) = self.hwnd {
+            window::prepare_popup(h, window::apps_use_dark_theme());
+            let acrylic = !software && window::apply_acrylic(h);
+            self.popup.set_translucent(acrylic);
+        }
+        let _ = self.popup.hide();
     }
 
     /// Hide when the popup loses focus, like a menu. Polls only while the
@@ -584,6 +600,8 @@ pub fn run() {
         })
     });
     with_app(|app| app.apply_capture_settings());
+    // Build the window ahead of time so the first open is styled and fast.
+    on_ui(|app| app.prewarm());
 
     if !background {
         on_ui(|app| app.show());

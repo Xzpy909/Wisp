@@ -47,48 +47,73 @@ component Hint inherits HorizontalLayout {
     Text { text: root.label; color: root.muted; font-size: 11.5px; vertical-alignment: center; }
 }
 
-// Round icon button: dark disc, thin rose ring. Shows a cross or a gear.
-component RoundButton inherits Rectangle {
+// Icon button in the style shared across the owner's apps: a bare light
+// icon; on hover a rounded square appears behind it, red for close.
+component FaeButton inherits Rectangle {
     in property <bool> dark;
     in property <bool> active;
     in property <string> icon: "close";
     callback clicked();
-    property <color> rose: #e0577f;
-    width: 22px;
-    height: 22px;
-    border-radius: self.width / 2;
-    border-width: 1.5px;
-    border-color: touch.has-hover || root.active ? root.rose : root.rose.with-alpha(0.75);
-    background: touch.pressed ? root.rose.with-alpha(0.35)
-        : touch.has-hover || root.active ? root.rose.with-alpha(0.2)
-        : (root.dark ? #1b1b1f : #2a2a30);
-    if root.icon == "close": Path {
-        width: 8px;
-        height: 8px;
-        x: (parent.width - self.width) / 2;
-        y: (parent.height - self.height) / 2;
-        viewbox-width: 8;
-        viewbox-height: 8;
-        stroke: #f4f4f6;
-        stroke-width: 1.5px;
-        fill: transparent;
-        commands: "M 0.5 0.5 L 7.5 7.5 M 7.5 0.5 L 0.5 7.5";
-    }
-    if root.icon == "gear": Path {
+    property <bool> is-close: root.icon == "close";
+    property <color> hover-bg: root.is-close ? #c42b1c : (root.dark ? #3a3a3f : #e3e3e8);
+    property <color> icon-color: (root.is-close && (touch.has-hover || touch.pressed)) ? #ffffff
+        : (root.dark ? #c8c8cc : #45454a);
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: touch.pressed ? root.hover-bg.darker(0.15)
+        : (touch.has-hover || root.active) ? root.hover-bg
+        : transparent;
+    if root.is-close: Path {
         width: 12px;
         height: 12px;
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
         viewbox-width: 12;
         viewbox-height: 12;
-        stroke: #f4f4f6;
+        stroke: root.icon-color;
         stroke-width: 1.3px;
         fill: transparent;
-        commands: "M 8 6 A 2 2 0 1 1 4 6 A 2 2 0 1 1 8 6 M 6 0.5 L 6 2.2 M 6 9.8 L 6 11.5 M 0.5 6 L 2.2 6 M 9.8 6 L 11.5 6 M 2.1 2.1 L 3.3 3.3 M 8.7 8.7 L 9.9 9.9 M 2.1 9.9 L 3.3 8.7 M 8.7 3.3 L 9.9 2.1";
+        commands: "M 0.5 0.5 L 11.5 11.5 M 11.5 0.5 L 0.5 11.5";
+    }
+    if root.icon == "gear": Path {
+        width: 16px;
+        height: 16px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        viewbox-width: 16;
+        viewbox-height: 16;
+        stroke: root.icon-color;
+        stroke-width: 1.3px;
+        fill: transparent;
+        commands: "M 13.14 6.72 L 14.91 6.90 L 14.91 9.10 L 13.14 9.28 L 12.54 10.73 L 13.66 12.11 L 12.11 13.66 L 10.73 12.54 L 9.28 13.14 L 9.10 14.91 L 6.90 14.91 L 6.72 13.14 L 5.27 12.54 L 3.89 13.66 L 2.34 12.11 L 3.46 10.73 L 2.86 9.28 L 1.09 9.10 L 1.09 6.90 L 2.86 6.72 L 3.46 5.27 L 2.34 3.89 L 3.89 2.34 L 5.27 3.46 L 6.72 2.86 L 6.90 1.09 L 9.10 1.09 L 9.28 2.86 L 10.73 3.46 L 12.11 2.34 L 13.66 3.89 L 12.54 5.27 Z M 10.30 8.0 A 2.3 2.3 0 1 1 5.70 8.0 A 2.3 2.3 0 1 1 10.30 8.0";
     }
     touch := TouchArea {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
+    }
+}
+
+// A switch whose label wraps instead of running off a narrow window.
+component SwitchRow inherits HorizontalLayout {
+    in property <string> text;
+    in property <color> ink;
+    in-out property <bool> checked;
+    callback toggled();
+    spacing: 10px;
+    VerticalLayout {
+        alignment: start;
+        Switch {
+            checked <=> root.checked;
+            toggled => { root.toggled(); }
+        }
+    }
+    Text {
+        text: root.text;
+        color: root.ink;
+        wrap: word-wrap;
+        vertical-alignment: center;
+        horizontal-stretch: 1;
     }
 }
 
@@ -285,7 +310,7 @@ export component Popup inherits Window {
                     }
                     VerticalLayout {
                         alignment: center;
-                        RoundButton {
+                        FaeButton {
                             icon: "gear";
                             dark: root.dark;
                             active: root.page == 1;
@@ -294,7 +319,7 @@ export component Popup inherits Window {
                     }
                     VerticalLayout {
                         alignment: center;
-                        RoundButton { icon: "close"; dark: root.dark; clicked => { root.dismiss(); } }
+                        FaeButton { icon: "close"; dark: root.dark; clicked => { root.dismiss(); } }
                     }
                 }
 
@@ -305,17 +330,35 @@ export component Popup inherits Window {
                     spacing: 10px;
                     VerticalLayout {
                         alignment: center;
-                        Path {
-                            width: 16px;
-                            height: 16px;
-                            viewbox-width: 16;
-                            viewbox-height: 16;
-                            stroke: root.muted;
-                            stroke-width: 1.5px;
-                            fill: transparent;
-                            commands: root.page == 1
-                                ? "M 9 3 L 4 8 L 9 13"
-                                : "M 10.5 10.5 L 14.5 14.5 M 11.5 6.5 A 5 5 0 1 1 1.5 6.5 A 5 5 0 1 1 11.5 6.5";
+                        // Magnifier on the list; a back arrow on the settings page.
+                        Rectangle {
+                            width: 28px;
+                            height: 28px;
+                            x: -6px;
+                            border-radius: 6px;
+                            background: root.page == 1 && back.has-hover ? (root.dark ? #3a3a3f : #e3e3e8) : transparent;
+                            Path {
+                                width: 16px;
+                                height: 16px;
+                                x: (parent.width - self.width) / 2;
+                                y: (parent.height - self.height) / 2;
+                                viewbox-width: 16;
+                                viewbox-height: 16;
+                                stroke: root.page == 1 ? root.ink : root.muted;
+                                stroke-width: 1.5px;
+                                fill: transparent;
+                                commands: root.page == 1
+                                    ? "M 10 3 L 5 8 L 10 13"
+                                    : "M 10.5 10.5 L 14.5 14.5 M 11.5 6.5 A 5 5 0 1 1 1.5 6.5 A 5 5 0 1 1 11.5 6.5";
+                            }
+                            back := TouchArea {
+                                enabled: root.page == 1;
+                                mouse-cursor: root.page == 1 ? pointer : default;
+                                clicked => {
+                                    root.page = 0;
+                                    search.focus();
+                                }
+                            }
                         }
                     }
                     Rectangle {
@@ -349,7 +392,7 @@ export component Popup inherits Window {
                     }
                     if !root.drawer: VerticalLayout {
                         alignment: center;
-                        RoundButton {
+                        FaeButton {
                             icon: "gear";
                             dark: root.dark;
                             active: root.page == 1;
@@ -358,7 +401,7 @@ export component Popup inherits Window {
                     }
                     if !root.drawer: VerticalLayout {
                         alignment: center;
-                        RoundButton { icon: "close"; dark: root.dark; clicked => { root.dismiss(); } }
+                        FaeButton { icon: "close"; dark: root.dark; clicked => { root.dismiss(); } }
                     }
                 }
 
@@ -448,18 +491,20 @@ export component Popup inherits Window {
                             wrap: word-wrap;
                         }
                     }
-                    // Settings page.
-                    if root.page == 1: ScrollView {
+                    // Settings page. Labels sit above their controls so the
+                    // page also fits the narrow Drawer at any scale.
+                    if root.page == 1: sv := ScrollView {
                         width: 100%;
                         height: 100%;
                         VerticalLayout {
+                            width: sv.visible-width;
                             alignment: start;
                             padding: 16px;
                             padding-top: 12px;
                             spacing: 10px;
 
                             Section { text: "Popup"; color: root.ink; }
-                            HorizontalLayout {
+                            if !root.drawer: HorizontalLayout {
                                 spacing: 6px;
                                 Segment {
                                     label: "Beam, centre";
@@ -483,14 +528,39 @@ export component Popup inherits Window {
                                     clicked => { root.style-index = 2; root.settings-changed(); }
                                 }
                             }
-                            Switch {
+                            if root.drawer: VerticalLayout {
+                                spacing: 6px;
+                                Segment {
+                                    label: "Beam, centre";
+                                    on: root.style-index == 0;
+                                    ink: root.ink;
+                                    line: root.line;
+                                    clicked => { root.style-index = 0; root.settings-changed(); }
+                                }
+                                Segment {
+                                    label: "Beam, at cursor";
+                                    on: root.style-index == 1;
+                                    ink: root.ink;
+                                    line: root.line;
+                                    clicked => { root.style-index = 1; root.settings-changed(); }
+                                }
+                                Segment {
+                                    label: "Drawer";
+                                    on: root.style-index == 2;
+                                    ink: root.ink;
+                                    line: root.line;
+                                    clicked => { root.style-index = 2; root.settings-changed(); }
+                                }
+                            }
+                            SwitchRow {
                                 text: "Glass effect (uses about 35 MB more memory, restarts Wisp)";
+                                ink: root.ink;
                                 checked <=> root.glass;
                                 toggled => { root.glass-toggled(); }
                             }
+                            Text { text: "Shortcut"; color: root.ink; }
                             HorizontalLayout {
                                 spacing: 8px;
-                                Text { text: "Shortcut"; color: root.ink; vertical-alignment: center; min-width: 110px; }
                                 hk := LineEdit {
                                     text <=> root.hotkey-text;
                                     placeholder-text: "Alt+V";
@@ -508,51 +578,59 @@ export component Popup inherits Window {
 
                             Rectangle { height: 1px; background: root.line; }
                             Section { text: "History"; color: root.ink; }
+                            Text { text: "Keep clips for (days, 0 = forever)"; color: root.ink; wrap: word-wrap; }
                             HorizontalLayout {
-                                spacing: 8px;
-                                Text { text: "Keep clips for"; color: root.ink; vertical-alignment: center; min-width: 110px; }
+                                alignment: start;
                                 SpinBox {
+                                    width: 150px;
                                     minimum: 0;
                                     maximum: 3650;
                                     value <=> root.keep-days;
                                     edited => { root.settings-changed(); }
                                 }
-                                Text { text: "days (0 = forever)"; color: root.muted; vertical-alignment: center; horizontal-stretch: 1; }
                             }
+                            Text { text: "Keep at most (clips, 0 = no limit)"; color: root.ink; wrap: word-wrap; }
                             HorizontalLayout {
-                                spacing: 8px;
-                                Text { text: "Keep at most"; color: root.ink; vertical-alignment: center; min-width: 110px; }
+                                alignment: start;
                                 SpinBox {
+                                    width: 150px;
                                     minimum: 0;
                                     maximum: 100000;
                                     step-size: 500;
                                     value <=> root.max-clips;
                                     edited => { root.settings-changed(); }
                                 }
-                                Text { text: "clips (0 = no limit)"; color: root.muted; vertical-alignment: center; horizontal-stretch: 1; }
                             }
-                            Text { text: "Pinned clips are always kept."; color: root.muted; font-size: 12px; }
-                            Switch {
+                            Text { text: "Pinned clips are always kept."; color: root.muted; font-size: 12px; wrap: word-wrap; }
+                            SwitchRow {
                                 text: "Record copied images";
+                                ink: root.ink;
                                 checked <=> root.capture-images;
                                 toggled => { root.settings-changed(); }
                             }
-                            Switch {
+                            SwitchRow {
                                 text: "Record copied files and folders";
+                                ink: root.ink;
                                 checked <=> root.capture-files;
                                 toggled => { root.settings-changed(); }
                             }
-                            HorizontalLayout {
+                            if !root.drawer: HorizontalLayout {
                                 spacing: 8px;
                                 alignment: start;
+                                Button { text: "Clear history (keeps pinned)"; clicked => { root.clear-history(); } }
+                                Button { text: "Open data folder"; clicked => { root.open-data-folder(); } }
+                            }
+                            if root.drawer: VerticalLayout {
+                                spacing: 8px;
                                 Button { text: "Clear history (keeps pinned)"; clicked => { root.clear-history(); } }
                                 Button { text: "Open data folder"; clicked => { root.open-data-folder(); } }
                             }
 
                             Rectangle { height: 1px; background: root.line; }
                             Section { text: "System"; color: root.ink; }
-                            Switch {
+                            SwitchRow {
                                 text: "Start with Windows";
+                                ink: root.ink;
                                 checked <=> root.autostart;
                                 toggled => { root.settings-changed(); }
                             }
