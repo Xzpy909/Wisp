@@ -4,8 +4,6 @@
 #[cfg(windows)]
 mod app;
 #[cfg(windows)]
-mod icon;
-#[cfg(windows)]
 mod tray;
 
 #[cfg(windows)]

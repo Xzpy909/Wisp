@@ -55,7 +55,9 @@ impl Tray {
             &quit,
         ])?;
 
-        let icon = Icon::from_rgba(crate::icon::rgba(), crate::icon::SIZE, crate::icon::SIZE)?;
+        // The icon embedded in wisp.exe, at the tray's size for this display.
+        let size = wisp_win::screen::small_icon_size();
+        let icon = Icon::from_resource(1, Some((size, size)))?;
         let tray = TrayIconBuilder::new()
             .with_icon(icon)
             .with_tooltip(format!("Wisp ({})", settings.hotkey))
