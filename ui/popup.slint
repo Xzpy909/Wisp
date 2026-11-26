@@ -5,6 +5,8 @@ import { ListView, ScrollView, Switch, SpinBox, LineEdit, Button, Palette } from
 
 export struct ClipRow {
     id: int,
+    // Part of a multiple selection (Shift+click, Ctrl+click).
+    marked: bool,
     kind: string,
     title: string,
     meta: string,
@@ -198,6 +200,8 @@ export component Popup inherits Window {
     in property <[ClipRow]> clips;
     in property <string> count-label;
     in-out property <int> selected: 0;
+    // How many clips are marked for a multiple selection.
+    in property <int> marked-count: 0;
     // 0 = clip list, 1 = settings.
     in-out property <int> page: 0;
     // Type filter, cycled with Tab; same order as `Filter::ALL` in Rust.
@@ -230,6 +234,8 @@ export component Popup inherits Window {
     callback forget(int);
     callback reveal(int);
     callback filter-changed();
+    // A row was clicked or reached with the arrows; Rust keeps the marks.
+    callback row-pressed(int, bool, bool);
 
     public function focus-search() {
         search.focus();
@@ -262,12 +268,13 @@ export component Popup inherits Window {
         return root.clips.length > root.selected ? root.clips[root.selected].id : -1;
     }
 
-    function move(delta: int) {
+    function move(delta: int, extend: bool) {
         if (root.clips.length == 0) {
             return;
         }
         root.selected = Math.max(0, Math.min(root.clips.length - 1, root.selected + delta));
         root.scroll-to-selected();
+        root.row-pressed(root.selected, extend, false);
     }
 
     // Keep the selected row in view.
@@ -293,7 +300,11 @@ export component Popup inherits Window {
             if (root.page != 0) {
                 return reject;
             }
-            if (event.text == Key.Return) {
+            if (event.text == Key.DownArrow || event.text == Key.UpArrow) {
+                root.move(event.text == Key.DownArrow ? 1 : -1, event.modifiers.shift);
+                return accept;
+            }
+            if (event.text == Key.Return || event.text == "\u{d}") {
                 if (root.selected-id() >= 0) {
                     root.paste(root.selected-id(), event.modifiers.shift);
                 }
@@ -334,6 +345,8 @@ export component Popup inherits Window {
                 if (root.page == 1) {
                     root.page = 0;
                     search.focus();
+                } else if (root.marked-count > 1) {
+                    root.row-pressed(root.selected, false, false);
                 } else if (root.query != "") {
                     root.query = "";
                     root.query-edited("");
@@ -342,14 +355,6 @@ export component Popup inherits Window {
                 } else {
                     root.dismiss();
                 }
-                return accept;
-            }
-            if (root.page == 0 && event.text == Key.DownArrow) {
-                root.move(1);
-                return accept;
-            }
-            if (root.page == 0 && event.text == Key.UpArrow) {
-                root.move(-1);
                 return accept;
             }
             reject
@@ -524,7 +529,7 @@ export component Popup inherits Window {
                                 x: 4px;
                                 width: parent.width - 8px;
                                 border-radius: 6px;
-                                background: i == root.selected ? root.sel : (hover.has-hover ? #8080800f : transparent);
+                                background: i == root.selected || row.marked ? root.sel : (hover.has-hover ? #8080800f : transparent);
                                 Rectangle {
                                     visible: i == root.selected;
                                     x: 0;
@@ -567,9 +572,43 @@ export component Popup inherits Window {
                                         horizontal-stretch: 0;
                                     }
                                 }
-                                hover := TouchArea {
-                                    clicked => { root.selected = i; search.focus(); }
-                                    double-clicked => { root.selected = i; root.paste(row.id, false); }
+                                ContextMenuArea {
+                                    width: 100%;
+                                    height: 100%;
+                                    hover := TouchArea {
+                                        pointer-event(e) => {
+                                            if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) {
+                                                root.row-pressed(i, e.modifiers.shift, e.modifiers.control);
+                                                search.focus();
+                                            }
+                                        }
+                                        double-clicked => { root.paste(row.id, false); }
+                                    }
+                                    Menu {
+                                        MenuItem {
+                                            title: row.marked && root.marked-count > 1 ? "Paste " + root.marked-count + " clips" : "Paste";
+                                            activated => { root.paste(row.id, false); }
+                                        }
+                                        MenuItem {
+                                            title: "Paste as plain text";
+                                            activated => { root.paste(row.id, true); }
+                                        }
+                                        MenuSeparator { }
+                                        MenuItem {
+                                            title: row.pinned ? "Unpin" : "Pin";
+                                            activated => { root.toggle-pin(row.id); }
+                                        }
+                                        MenuItem {
+                                            title: "Show in File Explorer";
+                                            enabled: row.kind == "files" || row.kind == "image";
+                                            activated => { root.reveal(row.id); }
+                                        }
+                                        MenuSeparator { }
+                                        MenuItem {
+                                            title: row.marked && root.marked-count > 1 ? "Forget " + root.marked-count + " clips" : "Forget";
+                                            activated => { root.forget(row.id); }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -739,6 +778,8 @@ export component Popup inherits Window {
                             for k in [
                                 { key: "Enter", what: "Paste into the app you were in" },
                                 { key: "Shift+Enter", what: "Paste as plain text (files as their paths)" },
+                                { key: "Shift+click, Ctrl+click", what: "Select several clips (also Shift+↑↓); Enter pastes them together" },
+                                { key: "Right-click", what: "Paste, pin or unpin, show in File Explorer, forget" },
                                 { key: "Tab, Shift+Tab", what: "Show only text, links, images, files, colours, code or pinned" },
                                 { key: "Ctrl+P", what: "Pin or unpin. Pinned clips stay on top and are never removed" },
                                 { key: "Ctrl+Delete", what: "Forget the clip" },
@@ -782,7 +823,7 @@ export component Popup inherits Window {
                     if root.page == 1: Hint { key: "Esc"; label: "Back to clips"; ink: root.ink; muted: root.muted; line: root.line; }
                     Text {
                         horizontal-stretch: 1;
-                        text: root.count-label;
+                        text: root.page == 0 && root.marked-count > 1 ? root.marked-count + " selected · " + root.count-label : root.count-label;
                         color: root.muted;
                         font-size: 11.5px;
                         horizontal-alignment: right;

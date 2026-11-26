@@ -132,12 +132,19 @@ fn key(vk: VIRTUAL_KEY, up: bool) -> INPUT {
     }
 }
 
+const MODIFIERS: [VIRTUAL_KEY; 8] = [VK_LSHIFT, VK_RSHIFT, VK_LMENU, VK_RMENU, VK_LWIN, VK_RWIN, VK_LCONTROL, VK_RCONTROL];
+
+/// True while Shift, Alt, Ctrl or Windows is physically held down.
+pub fn modifiers_held() -> bool {
+    MODIFIERS.iter().any(|&vk| unsafe { GetAsyncKeyState(vk as i32) } < 0)
+}
+
 /// Press Ctrl+V in whatever window has focus. Modifier keys still held down
 /// (Shift from Shift+Enter, say) are released first, so the app sees a plain
 /// Ctrl+V.
 pub fn send_ctrl_v() {
     let mut inputs = Vec::new();
-    for vk in [VK_LSHIFT, VK_RSHIFT, VK_LMENU, VK_RMENU, VK_LWIN, VK_RWIN, VK_LCONTROL, VK_RCONTROL] {
+    for vk in MODIFIERS {
         if unsafe { GetAsyncKeyState(vk as i32) } < 0 {
             inputs.push(key(vk, true));
         }

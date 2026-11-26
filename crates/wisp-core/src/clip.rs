@@ -98,6 +98,40 @@ impl Clip {
     }
 }
 
+/// Merge several clips into one for pasting together, in the given order.
+/// Files stay files when every clip is files (and not `plain`); otherwise
+/// everything becomes text, one clip per line, files as their paths. Images
+/// can't join text, so they are left out, unless there is nothing else.
+pub fn combine(contents: Vec<ClipContent>, plain: bool) -> Option<ClipContent> {
+    if contents.len() <= 1 {
+        return contents.into_iter().next();
+    }
+    if !plain && contents.iter().all(|c| matches!(c, ClipContent::Files(_))) {
+        let paths = contents
+            .into_iter()
+            .flat_map(|c| match c {
+                ClipContent::Files(p) => p,
+                _ => Vec::new(),
+            })
+            .collect();
+        return Some(ClipContent::Files(paths));
+    }
+    let parts: Vec<String> = contents
+        .iter()
+        .filter_map(|c| match c {
+            ClipContent::Text(t) => Some(t.clone()),
+            ClipContent::Files(p) => {
+                Some(p.iter().map(|p| p.to_string_lossy()).collect::<Vec<_>>().join("\r\n"))
+            }
+            ClipContent::Image { .. } => None,
+        })
+        .collect();
+    if parts.is_empty() {
+        return contents.into_iter().next();
+    }
+    Some(ClipContent::Text(parts.join("\r\n")))
+}
+
 /// Classify copied text.
 pub fn classify(text: &str) -> Kind {
     let t = text.trim();
@@ -228,5 +262,18 @@ mod tests {
         let mut img = clip(Kind::Image, "");
         img.image_size = Some((1280, 720));
         assert_eq!(img.title(), "Image 1280 × 720");
+    }
+    #[test]
+    fn combines_clips_for_pasting_together() {
+        let t = |s: &str| ClipContent::Text(s.into());
+        let f = |p: &[&str]| ClipContent::Files(p.iter().map(PathBuf::from).collect());
+        let img = ClipContent::Image { png: vec![1], width: 1, height: 1 };
+        assert_eq!(combine(vec![], false), None);
+        assert_eq!(combine(vec![t("Starfall")], false), Some(t("Starfall")));
+        assert_eq!(combine(vec![t("a"), t("b")], false), Some(t("a\r\nb")));
+        assert_eq!(combine(vec![f(&["C:\\a"]), f(&["C:\\b", "C:\\c"])], false), Some(f(&["C:\\a", "C:\\b", "C:\\c"])));
+        assert_eq!(combine(vec![f(&["C:\\a"]), f(&["C:\\b"])], true), Some(t("C:\\a\r\nC:\\b")));
+        assert_eq!(combine(vec![t("Moonforge"), f(&["C:\\a"]), img.clone()], false), Some(t("Moonforge\r\nC:\\a")));
+        assert_eq!(combine(vec![img.clone(), img.clone()], false), Some(img));
     }
 }

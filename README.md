@@ -43,6 +43,8 @@ Next: backup and restore of named clip sets (milestone 5).
 | ↑ ↓ | Move the selection |
 | Enter, double-click | Paste into the app you were in |
 | Shift+Enter | Paste as plain text (files as their paths) |
+| Shift+click, Ctrl+click, Shift+↑↓ | Select several clips; Enter pastes them together (text one per line, files as files) and Ctrl+P, Ctrl+Delete act on all of them |
+| Right-click | Menu: Paste, Paste as plain text, Pin or Unpin, Show in File Explorer, Forget |
 | Tab, Shift+Tab | Show only text, links, images, files, colours, code or pinned clips |
 | Ctrl+P | Pin or unpin; pinned clips stay on top and are never removed |
 | Ctrl+Delete | Forget the clip |

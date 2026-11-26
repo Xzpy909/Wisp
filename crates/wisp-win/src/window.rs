@@ -78,6 +78,16 @@ pub fn bring_to_front(hwnd: Hwnd) {
     }
 }
 
+/// True when `hwnd` belongs to this process, e.g. a menu Wisp opened.
+pub fn is_own_window(hwnd: Hwnd) -> bool {
+    if hwnd == 0 {
+        return false;
+    }
+    let mut pid = 0u32;
+    unsafe { GetWindowThreadProcessId(hwnd as _, &mut pid) };
+    pid != 0 && pid == unsafe { windows_sys::Win32::System::Threading::GetCurrentProcessId() }
+}
+
 /// Give focus back to the window that was active before the popup opened.
 pub fn restore_focus(hwnd: Hwnd) {
     if hwnd != 0 && unsafe { IsWindow(hwnd as _) } != 0 {
