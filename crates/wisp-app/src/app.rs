@@ -834,6 +834,9 @@ fn parse_hex_color(text: &str) -> Option<slint::Color> {
     Some(slint::Color::from_argb_u8(a, r, g, b))
 }
 
+/// The Settings page's "Support Wisp on Ko-fi" button opens this.
+const DONATE_URL: &str = "https://ko-fi.com/xzpy1";
+
 /// The latest published release, or None when offline or there is none yet.
 fn latest_release() -> Option<Release> {
     let agent = concat!("Wisp/", env!("CARGO_PKG_VERSION"));
@@ -999,6 +1002,7 @@ pub fn run() {
     popup.on_forget(|id| with_app(|app| app.forget(id as i64)));
     popup.on_reveal(|id| with_app(|app| app.reveal(id as i64)));
     popup.on_get_update(|| with_app(|app| app.get_update()));
+    popup.on_open_donate(|| http::open_in_browser(DONATE_URL));
     popup.on_open_data_folder(|| {
         let _ = std::process::Command::new("explorer").arg(Settings::dir()).spawn();
     });
