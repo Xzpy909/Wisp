@@ -118,6 +118,61 @@ component FaeButton inherits Rectangle {
 }
 
 // A switch whose label wraps instead of running off a narrow window.
+// "Support Wisp on Ko-fi": a coffee cup with a heart, on Ko-fi blue.
+component KofiButton inherits Rectangle {
+    callback clicked();
+    height: 34px;
+    border-radius: 17px;
+    background: touch.pressed ? #1f8fbd : touch.has-hover ? #2399c9 : #29abe0;
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 16px;
+        spacing: 8px;
+        alignment: center;
+        Rectangle {
+            width: 20px;
+            height: 16px;
+            y: (parent.height - self.height) / 2;
+            Path {
+                width: 100%;
+                height: 100%;
+                viewbox-width: 20;
+                viewbox-height: 16;
+                fill: transparent;
+                stroke: #ffffff;
+                stroke-width: 1.8px;
+                commands: "M 13.5 5 L 15.2 5 Q 18.4 5 18.4 8 Q 18.4 11 15.2 11 L 13.5 11";
+            }
+            Path {
+                width: 100%;
+                height: 100%;
+                viewbox-width: 20;
+                viewbox-height: 16;
+                fill: #ffffff;
+                commands: "M 1 2.5 L 14 2.5 L 14 10 Q 14 14.5 9.5 14.5 L 5.5 14.5 Q 1 14.5 1 10 Z";
+            }
+            Path {
+                width: 100%;
+                height: 100%;
+                viewbox-width: 20;
+                viewbox-height: 16;
+                fill: #ff5e5b;
+                commands: "M 7.5 12 L 4.6 9 Q 3.5 7.7 4.6 6.6 Q 6 5.4 7.5 7 Q 9 5.4 10.4 6.6 Q 11.5 7.7 10.4 9 Z";
+            }
+        }
+        Text {
+            text: "Support Wisp on Ko-fi";
+            color: #ffffff;
+            font-weight: 600;
+            vertical-alignment: center;
+        }
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
 component SwitchRow inherits HorizontalLayout {
     in property <string> text;
     in property <color> ink;
@@ -360,6 +415,7 @@ export component Popup inherits Window {
     /// Set when a newer release exists.
     in property <string> update-version;
     callback get-update();
+    callback open-donate();
 
     callback dismiss();
     callback query-edited(string);
@@ -1031,6 +1087,17 @@ export component Popup inherits Window {
                                     mouse-cursor: pointer;
                                     clicked => { root.get-update(); }
                                 }
+                            }
+                            Rectangle { height: 1px; background: root.line; }
+                            Section { text: "Support"; color: root.ink; }
+                            Text {
+                                text: "Wisp is free and open source. If it saves you time, you can buy me a coffee.";
+                                color: root.muted;
+                                wrap: word-wrap;
+                            }
+                            HorizontalLayout {
+                                alignment: start;
+                                KofiButton { clicked => { root.open-donate(); } }
                             }
                             Text {
                                 text: "Wisp " + root.version + " · Made with Slint";
