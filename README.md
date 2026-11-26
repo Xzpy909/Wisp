@@ -158,3 +158,7 @@ ui/                Slint UI
 installer/         Inno Setup script for the installer
 docs/design/       interactive prototypes of the four popup concepts
 ```
+
+## License
+
+[MIT](LICENSE)
