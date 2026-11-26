@@ -8,6 +8,7 @@ pub enum Action {
     Open,
     Style(PopupStyle),
     ToggleAutostart,
+    ToggleGlass,
     Quit,
 }
 
@@ -16,6 +17,7 @@ pub struct Tray {
     open: MenuItem,
     styles: Vec<(PopupStyle, CheckMenuItem)>,
     autostart: CheckMenuItem,
+    glass: CheckMenuItem,
     quit: MenuItem,
 }
 
@@ -31,6 +33,7 @@ impl Tray {
             style_menu.append(item)?;
         }
         let autostart = CheckMenuItem::new("Start with Windows", true, settings.start_with_windows, None);
+        let glass = CheckMenuItem::new("Glass effect (uses more memory)", true, settings.glass_effect, None);
         let quit = MenuItem::new("Quit Wisp", true, None);
 
         let menu = Menu::new();
@@ -38,6 +41,7 @@ impl Tray {
             &open,
             &PredefinedMenuItem::separator(),
             &style_menu,
+            &glass,
             &autostart,
             &PredefinedMenuItem::separator(),
             &quit,
@@ -51,7 +55,7 @@ impl Tray {
             .with_menu_on_left_click(false)
             .build()?;
 
-        Ok(Self { _icon: tray, open, styles, autostart, quit })
+        Ok(Self { _icon: tray, open, styles, autostart, glass, quit })
     }
 
     pub fn action_for(&self, id: &MenuId) -> Option<Action> {
@@ -60,6 +64,9 @@ impl Tray {
         }
         if id == self.autostart.id() {
             return Some(Action::ToggleAutostart);
+        }
+        if id == self.glass.id() {
+            return Some(Action::ToggleGlass);
         }
         if id == self.quit.id() {
             return Some(Action::Quit);
@@ -73,5 +80,6 @@ impl Tray {
             item.set_checked(*s == settings.popup_style);
         }
         self.autostart.set_checked(settings.start_with_windows);
+        self.glass.set_checked(settings.glass_effect);
     }
 }

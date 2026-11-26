@@ -14,7 +14,8 @@ Milestone 1 of 7, the skeleton:
 - `Alt+V` opens and closes the popup; Esc closes it and returns focus
 - Three popup styles: Beam at the centre of the screen, Beam at the text
   cursor, and Drawer by the tray (switch in the tray menu)
-- Acrylic backdrop on Windows 11, solid panel on Windows 10
+- Opaque popup by default (about 4 MB of memory); optional acrylic glass on
+  Windows 11 from the tray menu (about 40 MB, as it needs the GPU renderer)
 - Start with Windows (per-user, no admin), on by default
 - Single instance: launching Wisp again opens the popup
 
@@ -33,16 +34,19 @@ cargo build --release -p wisp-app
 Every push also builds `wisp.exe` in GitHub Actions; download it from the run's
 artifacts.
 
-### Measuring memory
+### Memory
 
-The milestone 1 goal is to measure idle memory. Start Wisp, open and close the
-popup once, wait a few seconds, then read **Memory (active private working
-set)** for `wisp.exe` in Task Manager's Details tab. Compare the two renderers:
+Read **Memory (active private working set)** for `wisp.exe` in Task Manager's
+Details tab after opening and closing the popup once.
 
-```powershell
-.\wisp.exe                                   # GPU renderer (femtovg), acrylic
-$env:SLINT_BACKEND="winit-software"; .\wisp.exe   # software renderer, opaque
-```
+| Mode | Renderer | Idle memory (measured) |
+| --- | --- | --- |
+| Default | Slint software renderer | about 4 MB |
+| Glass effect on | Slint femtovg (OpenGL) | about 40 MB |
+
+Most of the difference is the GPU driver loaded into the process. The tray
+menu's **Glass effect** item switches modes and restarts Wisp. `SLINT_BACKEND`
+(for example `winit-software` or `winit-femtovg`) overrides the setting.
 
 ## Settings
 
@@ -52,7 +56,8 @@ $env:SLINT_BACKEND="winit-software"; .\wisp.exe   # software renderer, opaque
 {
   "popup-style": "beam-centre",
   "hotkey": "Alt+V",
-  "start-with-windows": true
+  "start-with-windows": true,
+  "glass-effect": false
 }
 ```
 

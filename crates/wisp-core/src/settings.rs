@@ -37,6 +37,9 @@ pub struct Settings {
     /// Global shortcut, e.g. `Alt+V` or `Ctrl+Shift+Space`.
     pub hotkey: String,
     pub start_with_windows: bool,
+    /// Acrylic glass behind the popup. Needs the GPU renderer, which costs
+    /// about 35 MB more memory, so it is off by default.
+    pub glass_effect: bool,
 }
 
 impl Default for Settings {
@@ -45,6 +48,7 @@ impl Default for Settings {
             popup_style: PopupStyle::default(),
             hotkey: "Alt+V".into(),
             start_with_windows: true,
+            glass_effect: false,
         }
     }
 }
@@ -99,6 +103,7 @@ mod tests {
             popup_style: PopupStyle::Drawer,
             hotkey: "Ctrl+Shift+Space".into(),
             start_with_windows: false,
+            glass_effect: true,
         };
         s.save(&path).unwrap();
         let (loaded, first) = Settings::load(&path);
@@ -120,5 +125,6 @@ mod tests {
         assert_eq!(s.popup_style, PopupStyle::BeamCursor);
         assert_eq!(s.hotkey, "Alt+V");
         assert!(s.start_with_windows);
+        assert!(!s.glass_effect);
     }
 }

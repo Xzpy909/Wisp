@@ -22,20 +22,36 @@ pub enum Instance {
     Secondary,
 }
 
-pub fn acquire() -> Instance {
+/// Become the running copy. With `wait_for_previous` (used when Wisp restarts
+/// itself) keep trying for up to 5 seconds while the old copy shuts down,
+/// instead of handing over to it.
+pub fn acquire(wait_for_previous: bool) -> Instance {
+    let tries = if wait_for_previous { 50 } else { 1 };
+    for attempt in 1..=tries {
+        if let Some(primary) = try_primary() {
+            return Instance::Primary(primary);
+        }
+        if attempt < tries {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    }
+    signal_primary();
+    Instance::Secondary
+}
+
+fn try_primary() -> Option<SingleInstance> {
     let name = wide(MUTEX_NAME);
     // SAFETY: valid null-terminated name; null security attributes.
     let mutex = unsafe { CreateMutexW(std::ptr::null(), 1, name.as_ptr()) };
     let already = unsafe { GetLastError() } == ERROR_ALREADY_EXISTS;
     if already {
         unsafe { CloseHandle(mutex) };
-        signal_primary();
-        return Instance::Secondary;
+        return None;
     }
     let ev = wide(EVENT_NAME);
     // Auto-reset event, initially unsignalled.
     let event = unsafe { CreateEventW(std::ptr::null(), 0, 0, ev.as_ptr()) };
-    Instance::Primary(SingleInstance { mutex: mutex as usize, event: event as usize })
+    Some(SingleInstance { mutex: mutex as usize, event: event as usize })
 }
 
 fn signal_primary() {

@@ -97,7 +97,10 @@ impl App {
         if self.hwnd.is_none() {
             self.hwnd = native_handle(&self.popup);
             if let Some(h) = self.hwnd {
-                let software = std::env::var("SLINT_BACKEND").is_ok_and(|b| b.contains("software"));
+                let software = match std::env::var("SLINT_BACKEND") {
+                    Ok(b) => b.contains("software"),
+                    Err(_) => !self.settings.glass_effect,
+                };
                 let acrylic = !software && window::apply_acrylic(h);
                 self.popup.set_translucent(acrylic);
             }
@@ -150,15 +153,29 @@ impl App {
                 apply_autostart(&self.settings);
                 self.save();
             }
-            Some(Action::Quit) => {
-                if let Some(hk) = self.hotkey.take() {
-                    let _ = self.hotkeys.unregister(hk);
+            Some(Action::ToggleGlass) => {
+                // The renderer is chosen once at startup, so restart Wisp.
+                self.settings.glass_effect = !self.settings.glass_effect;
+                self.save();
+                let spawned = std::env::current_exe().and_then(|exe| {
+                    std::process::Command::new(exe).args(["--background", "--restart"]).spawn()
+                });
+                match spawned {
+                    Ok(_) => self.quit(),
+                    Err(e) => window::warn("Wisp", &format!("Could not restart Wisp:\n{e}\n\nQuit and start it again.")),
                 }
-                let _ = slint::quit_event_loop();
             }
+            Some(Action::Quit) => self.quit(),
             None => {}
         }
         self.tray.sync(&self.settings);
+    }
+
+    fn quit(&mut self) {
+        if let Some(hk) = self.hotkey.take() {
+            let _ = self.hotkeys.unregister(hk);
+        }
+        let _ = slint::quit_event_loop();
     }
 
     fn save(&self) {
@@ -194,6 +211,19 @@ fn apply_autostart(settings: &Settings) {
     }
 }
 
+/// The software renderer keeps Wisp at a few MB; the GPU renderer is needed
+/// only for the acrylic glass effect. `SLINT_BACKEND` still overrides both.
+fn select_renderer(settings: &Settings) {
+    if std::env::var_os("SLINT_BACKEND").is_some() {
+        return;
+    }
+    let renderer = if settings.glass_effect { "femtovg" } else { "software" };
+    let _ = slint::BackendSelector::new()
+        .backend_name("winit".into())
+        .renderer_name(renderer.into())
+        .select();
+}
+
 fn register_hotkey(manager: &GlobalHotKeyManager, text: &str) -> Option<HotKey> {
     let hotkey: HotKey = match text.parse() {
         Ok(h) => h,
@@ -217,11 +247,13 @@ fn register_hotkey(manager: &GlobalHotKeyManager, text: &str) -> Option<HotKey> 
 }
 
 pub fn run() {
-    let single = match instance::acquire() {
+    let args: Vec<String> = std::env::args().collect();
+    let has = |flag: &str| args.iter().any(|a| a == flag);
+    let single = match instance::acquire(has("--restart")) {
         instance::Instance::Primary(s) => s,
         instance::Instance::Secondary => return,
     };
-    let background = std::env::args().any(|a| a == "--background");
+    let background = has("--background");
 
     let settings_path = Settings::default_path();
     let (settings, first_run) = Settings::load(&settings_path);
@@ -229,6 +261,7 @@ pub fn run() {
         let _ = settings.save(&settings_path);
     }
     apply_autostart(&settings);
+    select_renderer(&settings);
 
     let popup = Popup::new().expect("create popup window");
     popup.set_hotkey_label(settings.hotkey.clone().into());
