@@ -19,6 +19,7 @@ use slint::{
 use tray_icon::menu::MenuEvent;
 use tray_icon::{MouseButton, MouseButtonState, TrayIconEvent};
 use wisp_core::clip::{combine, now_secs, relative_time};
+use wisp_core::backup::{self, BackupInfo};
 use wisp_core::{images, popup_rect, Clip, ClipContent, Filter, Kind, PopupStyle, Settings, Store};
 use wisp_win::clipboard::{self, CaptureOptions};
 use wisp_win::{autostart, instance, paste, screen, window, Hwnd};
@@ -192,6 +193,10 @@ impl App {
         use crate::tray::Action;
         match self.tray.action_for(id) {
             Some(Action::Open) => self.show(),
+            Some(Action::Backups) => {
+                self.show();
+                self.open_backups(false);
+            }
             Some(Action::Style(s)) => {
                 self.settings.popup_style = s;
                 self.save();
@@ -305,6 +310,12 @@ impl App {
         self.sync_marks();
     }
 
+    /// Mark every listed clip (the current search and filter's results).
+    fn select_all(&mut self) {
+        self.marked = self.popup.get_clips().iter().map(|r| r.id as i64).collect();
+        self.sync_marks();
+    }
+
     fn sync_marks(&self) {
         let model = self.popup.get_clips();
         for i in 0..model.row_count() {
@@ -385,6 +396,166 @@ impl App {
         }
         self.marked.clear();
         self.refresh();
+    }
+
+    /// The Clip sets page; with `focus_name`, ready to type a new set's name.
+    fn open_backups(&mut self, focus_name: bool) {
+        self.popup.set_backup_status("".into());
+        self.popup.set_backup_error(false);
+        self.popup.set_confirm_path("".into());
+        self.popup.set_focus_set_name(focus_name);
+        self.popup.set_page(2);
+        self.refresh_backups();
+    }
+
+    fn current_fingerprint(&self) -> Option<u64> {
+        self.store.as_ref().and_then(|s| s.fingerprint().ok())
+    }
+
+    fn refresh_backups(&self) {
+        let now = now_secs();
+        let current = self.current_fingerprint();
+        let rows = |list: Vec<BackupInfo>| -> slint::ModelRc<BackupRow> {
+            let rows: Vec<BackupRow> = list
+                .into_iter()
+                .map(|b| {
+                    // Ticked when the current clips are exactly this set's.
+                    let same = current == Some(b.fingerprint);
+                    BackupRow {
+                        detail: format!(
+                            "{} · saved {}{}",
+                            clips_label(b.clips as usize),
+                            saved_ago(b.created_at, now),
+                            if same { " · same as current clips" } else { "" }
+                        )
+                        .into(),
+                        name: b.name.into(),
+                        count: b.clips as i32,
+                        active: same,
+                        path: b.path.to_string_lossy().into_owned().into(),
+                    }
+                })
+                .collect();
+            Rc::new(VecModel::from(rows)).into()
+        };
+        let snapshots = backup::list(&snapshots_dir());
+        self.popup.set_can_undo_switch(!snapshots.is_empty());
+        self.popup.set_backups(rows(backup::list(&sets_dir())));
+        self.popup.set_snapshots(rows(snapshots));
+    }
+
+    fn backup_status(&self, text: String, error: bool) {
+        self.popup.set_backup_status(text.into());
+        self.popup.set_backup_error(error);
+    }
+
+    /// Save all clips as a named set, replacing a set of the same name.
+    fn create_backup(&mut self, name: &str) {
+        let name = name.trim();
+        let Some(stem) = backup::file_stem_for(name) else {
+            return self.backup_status("Type a name for the set first.".into(), true);
+        };
+        let path = sets_dir().join(format!("{stem}.{}", backup::EXTENSION));
+        if self.write_set(&path, name) {
+            self.popup.set_backup_name("".into());
+        }
+    }
+
+    /// Overwrite an existing set with the current clips, keeping its name.
+    fn update_backup(&mut self, path: &str) {
+        let old = PathBuf::from(path);
+        let Some(info) = backup::info(&old) else {
+            self.backup_status("That set can't be read. It may have been moved or damaged.".into(), true);
+            return self.refresh_backups();
+        };
+        // Sets from early builds move to the current extension.
+        let new = old.with_extension(backup::EXTENSION);
+        if self.write_set(&new, &info.name) && new != old {
+            let _ = std::fs::remove_file(&old);
+            self.refresh_backups();
+        }
+    }
+
+    fn write_set(&mut self, path: &std::path::Path, name: &str) -> bool {
+        let Some(store) = self.store.as_ref() else { return false };
+        let ok = match store.backup_to(path, name, now_secs()) {
+            Ok(n) => {
+                self.backup_status(format!("Saved {} as \u{201c}{name}\u{201d}.", clips_label(n)), false);
+                true
+            }
+            Err(e) => {
+                self.backup_status(format!("Could not save the set: {e}"), true);
+                false
+            }
+        };
+        self.refresh_backups();
+        ok
+    }
+
+    /// Swap in a set's clips, after keeping the current ones under
+    /// Previous clips.
+    fn load_set(&mut self, path: &str) {
+        self.switch_to(PathBuf::from(path));
+    }
+
+    /// Go back to the clips from before the last switch.
+    fn undo_switch(&mut self) {
+        let Some(newest) = backup::list(&snapshots_dir()).into_iter().next() else { return };
+        self.switch_to(newest.path);
+    }
+
+    fn switch_to(&mut self, path: PathBuf) {
+        let Some(info) = backup::info(&path) else {
+            self.backup_status("That set can't be read. It may have been moved or damaged.".into(), true);
+            return self.refresh_backups();
+        };
+        let current = self.current_fingerprint();
+        if current == Some(info.fingerprint) {
+            self.backup_status(format!("The current clips are already \u{201c}{}\u{201d}.", info.name), false);
+            return self.refresh_backups();
+        }
+        let Some(store) = self.store.as_ref() else { return };
+        let now = now_secs();
+        // Name the snapshot after the set the clips match, if any.
+        let matching = backup::list(&sets_dir()).into_iter().find(|b| Some(b.fingerprint) == current).map(|b| b.name);
+        let snapshot_name = match matching {
+            Some(n) => format!("{n}, before loading {}", info.name),
+            None => format!("Before loading {}", info.name),
+        };
+        let snapshot = snapshots_dir().join(format!("before-{now}.{}", backup::EXTENSION));
+        if let Err(e) = store.backup_to(&snapshot, &snapshot_name, now) {
+            return self.backup_status(format!("Nothing changed: saving the current clips failed ({e})."), true);
+        }
+        match store.restore_from(&path) {
+            Ok(n) => {
+                self.backup_status(format!("Loaded {} from \u{201c}{}\u{201d}.", clips_label(n), info.name), false);
+            }
+            Err(e) => {
+                let _ = std::fs::remove_file(&snapshot);
+                self.backup_status(format!("Nothing changed: {e}"), true);
+            }
+        }
+        // Pruned after loading, so loading the oldest snapshot works.
+        backup::prune(&snapshots_dir(), backup::KEEP_SNAPSHOTS);
+        self.thumbs.clear();
+        self.marked.clear();
+        self.popup.set_selected(0);
+        self.refresh();
+        self.refresh_backups();
+    }
+
+    fn delete_backup(&mut self, path: &str) {
+        let file = PathBuf::from(path);
+        // Only files in Wisp's own set folders.
+        let parent = file.parent().map(|p| p.to_path_buf());
+        if parent == Some(sets_dir()) || parent == Some(snapshots_dir()) {
+            if let Err(e) = std::fs::remove_file(&file) {
+                self.backup_status(format!("Could not delete the set: {e}"), true);
+            } else {
+                self.backup_status("Set deleted.".into(), false);
+            }
+        }
+        self.refresh_backups();
     }
 
     /// Show a file or image clip in File Explorer.
@@ -512,6 +683,31 @@ impl App {
         if let Err(e) = self.settings.save(&self.settings_path) {
             window::warn("Wisp", &format!("Could not save settings:\n{e}"));
         }
+    }
+}
+
+fn sets_dir() -> PathBuf {
+    Settings::dir().join("Clip sets")
+}
+
+fn snapshots_dir() -> PathBuf {
+    sets_dir().join("Previous clips")
+}
+
+fn clips_label(n: usize) -> String {
+    if n == 1 {
+        "1 clip".into()
+    } else {
+        format!("{n} clips")
+    }
+}
+
+/// "just now", "5 min ago", "yesterday", "4 days ago".
+fn saved_ago(then: i64, now: i64) -> String {
+    match relative_time(then, now).as_str() {
+        "now" => "just now".into(),
+        "Yesterday" => "yesterday".into(),
+        t => format!("{t} ago"),
     }
 }
 
@@ -722,6 +918,20 @@ pub fn run() {
     popup.on_apply_hotkey(|t| with_app(|app| app.apply_hotkey(&t)));
     popup.on_clear_history(|| with_app(|app| app.clear_history()));
     popup.on_filter_changed(|| with_app(|app| app.refresh()));
+    popup.on_open_backups(|| with_app(|app| app.open_backups(false)));
+    popup.on_save_set_requested(|| with_app(|app| app.open_backups(true)));
+    popup.on_sets_menu_opening(|| with_app(|app| app.refresh_backups()));
+    popup.on_undo_switch(|| with_app(|app| app.undo_switch()));
+    popup.on_create_backup(|name| with_app(|app| app.create_backup(&name)));
+    popup.on_restore_backup(|p| with_app(|app| app.load_set(&p)));
+    popup.on_update_backup(|p| with_app(|app| app.update_backup(&p)));
+    popup.on_delete_backup(|p| with_app(|app| app.delete_backup(&p)));
+    popup.on_open_backups_folder(|| {
+        let dir = sets_dir();
+        let _ = std::fs::create_dir_all(&dir);
+        let _ = std::process::Command::new("explorer").arg(dir).spawn();
+    });
+    popup.on_select_all(|| with_app(|app| app.select_all()));
     popup.on_row_pressed(|i, shift, ctrl| with_app(|app| app.row_pressed(i.max(0) as usize, shift, ctrl)));
     popup.on_paste(|id, plain| with_app(|app| app.paste(id as i64, plain)));
     popup.on_toggle_pin(|id| with_app(|app| app.toggle_pin(id as i64)));

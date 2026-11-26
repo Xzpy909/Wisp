@@ -50,6 +50,7 @@ pub enum Error {
     Db(rusqlite::Error),
     Io(std::io::Error),
     Image(String),
+    Backup(String),
 }
 
 impl std::fmt::Display for Error {
@@ -58,6 +59,7 @@ impl std::fmt::Display for Error {
             Error::Db(e) => write!(f, "database: {e}"),
             Error::Io(e) => write!(f, "file: {e}"),
             Error::Image(e) => write!(f, "image: {e}"),
+            Error::Backup(e) => write!(f, "{e}"),
         }
     }
 }
@@ -108,6 +110,10 @@ impl Store {
         conn.busy_timeout(std::time::Duration::from_secs(2))?;
         conn.execute_batch(SCHEMA)?;
         Ok(Store { conn, images_dir })
+    }
+
+    pub(crate) fn conn(&self) -> &Connection {
+        &self.conn
     }
 
     pub fn images_dir(&self) -> &Path {

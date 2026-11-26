@@ -6,6 +6,7 @@ use wisp_core::{PopupStyle, Settings};
 
 pub enum Action {
     Open,
+    Backups,
     Style(PopupStyle),
     ToggleAutostart,
     ToggleGlass,
@@ -16,6 +17,7 @@ pub enum Action {
 pub struct Tray {
     icon: TrayIcon,
     open: MenuItem,
+    backups: MenuItem,
     styles: Vec<(PopupStyle, CheckMenuItem)>,
     autostart: CheckMenuItem,
     glass: CheckMenuItem,
@@ -37,11 +39,13 @@ impl Tray {
         let autostart = CheckMenuItem::new("Start with Windows", true, settings.start_with_windows, None);
         let glass = CheckMenuItem::new("Glass effect (uses more memory)", true, settings.glass_effect, None);
         let pause = CheckMenuItem::new("Pause recording", true, false, None);
+        let backups = MenuItem::new("Clip sets…", true, None);
         let quit = MenuItem::new("Quit Wisp", true, None);
 
         let menu = Menu::new();
         menu.append_items(&[
             &open,
+            &backups,
             &pause,
             &PredefinedMenuItem::separator(),
             &style_menu,
@@ -59,12 +63,15 @@ impl Tray {
             .with_menu_on_left_click(false)
             .build()?;
 
-        Ok(Self { icon: tray, open, styles, autostart, glass, pause, quit })
+        Ok(Self { icon: tray, open, backups, styles, autostart, glass, pause, quit })
     }
 
     pub fn action_for(&self, id: &MenuId) -> Option<Action> {
         if id == self.open.id() {
             return Some(Action::Open);
+        }
+        if id == self.backups.id() {
+            return Some(Action::Backups);
         }
         if id == self.autostart.id() {
             return Some(Action::ToggleAutostart);

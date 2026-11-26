@@ -17,6 +17,14 @@ export struct ClipRow {
     has-thumb: bool,
 }
 
+export struct BackupRow {
+    name: string,
+    detail: string,
+    path: string,
+    count: int,
+    active: bool,
+}
+
 component Kbd inherits Rectangle {
     in property <string> key;
     in property <color> ink;
@@ -78,6 +86,18 @@ component FaeButton inherits Rectangle {
         stroke-width: 1.3px;
         fill: transparent;
         commands: "M 0.5 0.5 L 11.5 11.5 M 11.5 0.5 L 0.5 11.5";
+    }
+    if root.icon == "sets": Path {
+        width: 16px;
+        height: 16px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        viewbox-width: 16;
+        viewbox-height: 16;
+        stroke: root.icon-color;
+        stroke-width: 1.3px;
+        fill: transparent;
+        commands: "M 1.5 5.5 L 8 2.2 L 14.5 5.5 L 8 8.8 Z M 1.5 8.4 L 8 11.7 L 14.5 8.4 M 1.5 11.3 L 8 14.6 L 14.5 11.3";
     }
     if root.icon == "gear": Path {
         width: 16px;
@@ -190,6 +210,122 @@ component Segment inherits Rectangle {
     }
 }
 
+// One clip set in the list. Load swaps it in at once (the switch can be
+// undone); Update and Delete ask once more, in place.
+component BackupItem inherits Rectangle {
+    in property <BackupRow> backup;
+    in property <bool> can-update: true;
+    in property <color> ink;
+    in property <color> muted;
+    in property <color> line;
+    // "update:<path>" or "delete:<path>" while a click waits to be confirmed.
+    in-out property <string> confirm-path;
+    callback restore(string);
+    callback update(string);
+    callback delete(string);
+    property <bool> asking-update: root.confirm-path == "update:" + root.backup.path;
+    property <bool> asking-delete: root.confirm-path == "delete:" + root.backup.path;
+    property <bool> asking: root.asking-update || root.asking-delete;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: root.asking || root.backup.active ? #2f6bff : root.line;
+    VerticalLayout {
+        padding: 10px;
+        spacing: 6px;
+        Text { text: root.backup.name; color: root.ink; font-weight: 600; wrap: word-wrap; }
+        Text { text: root.backup.detail; color: root.muted; font-size: 12px; wrap: word-wrap; }
+        if root.asking: Text {
+            text: root.asking-delete ? "Delete this set? Its file is removed." : "Replace this set with the current clips?";
+            color: root.ink;
+            wrap: word-wrap;
+        }
+        if !root.asking: HorizontalLayout {
+            alignment: start;
+            spacing: 8px;
+            Button {
+                text: "Load";
+                enabled: !root.backup.active;
+                clicked => { root.restore(root.backup.path); }
+            }
+            if root.can-update: Button {
+                text: "Update";
+                enabled: !root.backup.active;
+                clicked => { root.confirm-path = "update:" + root.backup.path; }
+            }
+            Button {
+                text: "Delete";
+                clicked => { root.confirm-path = "delete:" + root.backup.path; }
+            }
+        }
+        if root.asking: HorizontalLayout {
+            alignment: start;
+            spacing: 8px;
+            Button {
+                text: root.asking-delete ? "Delete" : "Update set";
+                primary: true;
+                clicked => {
+                    if (root.asking-delete) {
+                        root.confirm-path = "";
+                        root.delete(root.backup.path);
+                    } else {
+                        root.confirm-path = "";
+                        root.update(root.backup.path);
+                    }
+                }
+            }
+            Button { text: "Cancel"; clicked => { root.confirm-path = ""; } }
+        }
+    }
+}
+
+// The clip sets button in the header and its menu.
+component SetsButton inherits Rectangle {
+    in property <bool> dark;
+    in property <[BackupRow]> sets;
+    in property <bool> can-undo;
+    callback about-to-open();
+    callback save-set();
+    callback load-set(string);
+    callback undo-switch();
+    callback manage-sets();
+    width: 32px;
+    height: 32px;
+    menu := ContextMenuArea {
+        FaeButton {
+            icon: "sets";
+            dark: root.dark;
+            clicked => {
+                root.about-to-open();
+                menu.show({ x: 0, y: self.height + 4px });
+            }
+        }
+        Menu {
+            MenuItem {
+                title: "Save clips as set…";
+                activated => { root.save-set(); }
+            }
+            if root.can-undo: MenuItem {
+                title: "Back to previous clips";
+                activated => { root.undo-switch(); }
+            }
+            MenuSeparator { }
+            if root.sets.length == 0: MenuItem {
+                title: "No sets yet";
+                enabled: false;
+            }
+            for s in root.sets: MenuItem {
+                title: (s.active ? "✓  " : "     ") + s.name + "   (" + s.count + ")";
+                activated => { root.load-set(s.path); }
+            }
+            MenuSeparator { }
+            MenuItem {
+                title: "Manage sets…";
+                activated => { root.manage-sets(); }
+            }
+        }
+    }
+}
+
 export component Popup inherits Window {
     in property <bool> drawer: false;
     in property <bool> dark: false;
@@ -202,7 +338,7 @@ export component Popup inherits Window {
     in-out property <int> selected: 0;
     // How many clips are marked for a multiple selection.
     in property <int> marked-count: 0;
-    // 0 = clip list, 1 = settings.
+    // 0 = clip list, 1 = settings, 2 = backups.
     in-out property <int> page: 0;
     // Type filter, cycled with Tab; same order as `Filter::ALL` in Rust.
     in-out property <int> filter: 0;
@@ -228,6 +364,27 @@ export component Popup inherits Window {
     callback apply-hotkey(string);
     callback clear-history();
     callback open-data-folder();
+
+    // Clip sets page and menu.
+    in property <[BackupRow]> backups;
+    in property <bool> can-undo-switch;
+    // Focus the set name field when the page opens (Ctrl+S, Save clips as set).
+    in-out property <bool> focus-set-name;
+    in property <[BackupRow]> snapshots;
+    in-out property <string> backup-name;
+    in property <string> backup-status;
+    in property <bool> backup-error;
+    // The backup a Restore or Delete click waits to have confirmed.
+    in-out property <string> confirm-path;
+    callback open-backups();
+    callback save-set-requested();
+    callback sets-menu-opening();
+    callback undo-switch();
+    callback create-backup(string);
+    callback restore-backup(string);
+    callback update-backup(string);
+    callback delete-backup(string);
+    callback open-backups-folder();
     // Clip actions, by clip id.
     callback paste(int, bool);
     callback toggle-pin(int);
@@ -236,6 +393,7 @@ export component Popup inherits Window {
     callback filter-changed();
     // A row was clicked or reached with the arrows; Rust keeps the marks.
     callback row-pressed(int, bool, bool);
+    callback select-all();
 
     public function focus-search() {
         search.focus();
@@ -256,6 +414,16 @@ export component Popup inherits Window {
     property <color> accent: #2f6bff;
     property <color> sel: root.dark ? #5082ff38 : #2f6bff1f;
     property <color> panel: root.dark ? #202024 : #f9f9fb;
+
+    function go-back() {
+        root.confirm-path = "";
+        if (root.page == 2) {
+            root.page = 1;
+        } else {
+            root.page = 0;
+            search.focus();
+        }
+    }
 
     function set-filter(f: int) {
         root.filter = Math.mod(f + root.filter-names.length, root.filter-names.length);
@@ -331,6 +499,14 @@ export component Popup inherits Window {
                     }
                     return accept;
                 }
+                if (event.text == "s" || event.text == "S") {
+                    root.save-set-requested();
+                    return accept;
+                }
+                if (event.text == "a" || event.text == "A") {
+                    root.select-all();
+                    return accept;
+                }
                 if (event.text == "o" || event.text == "O") {
                     if (root.selected-id() >= 0) {
                         root.reveal(root.selected-id());
@@ -342,9 +518,8 @@ export component Popup inherits Window {
         }
         key-pressed(event) => {
             if (event.text == Key.Escape) {
-                if (root.page == 1) {
-                    root.page = 0;
-                    search.focus();
+                if (root.page != 0) {
+                    root.go-back();
                 } else if (root.marked-count > 1) {
                     root.row-pressed(root.selected, false, false);
                 } else if (root.query != "") {
@@ -384,11 +559,24 @@ export component Popup inherits Window {
                     }
                     VerticalLayout {
                         alignment: center;
+                        SetsButton {
+                            dark: root.dark;
+                            sets: root.backups;
+                            can-undo: root.can-undo-switch;
+                            about-to-open => { root.sets-menu-opening(); }
+                            save-set => { root.save-set-requested(); }
+                            load-set(p) => { root.restore-backup(p); }
+                            undo-switch => { root.undo-switch(); }
+                            manage-sets => { root.open-backups(); }
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
                         FaeButton {
                             icon: "gear";
                             dark: root.dark;
-                            active: root.page == 1;
-                            clicked => { root.page = root.page == 1 ? 0 : 1; }
+                            active: root.page != 0;
+                            clicked => { root.page = root.page != 0 ? 0 : 1; root.confirm-path = ""; }
                         }
                     }
                     VerticalLayout {
@@ -410,7 +598,7 @@ export component Popup inherits Window {
                             height: 28px;
                             x: -6px;
                             border-radius: 6px;
-                            background: root.page == 1 && back.has-hover ? (root.dark ? #3a3a3f : #e3e3e8) : transparent;
+                            background: root.page != 0 && back.has-hover ? (root.dark ? #3a3a3f : #e3e3e8) : transparent;
                             Path {
                                 width: 16px;
                                 height: 16px;
@@ -418,20 +606,17 @@ export component Popup inherits Window {
                                 y: (parent.height - self.height) / 2;
                                 viewbox-width: 16;
                                 viewbox-height: 16;
-                                stroke: root.page == 1 ? root.ink : root.muted;
+                                stroke: root.page != 0 ? root.ink : root.muted;
                                 stroke-width: 1.5px;
                                 fill: transparent;
-                                commands: root.page == 1
+                                commands: root.page != 0
                                     ? "M 10 3 L 5 8 L 10 13"
                                     : "M 10.5 10.5 L 14.5 14.5 M 11.5 6.5 A 5 5 0 1 1 1.5 6.5 A 5 5 0 1 1 11.5 6.5";
                             }
                             back := TouchArea {
-                                enabled: root.page == 1;
-                                mouse-cursor: root.page == 1 ? pointer : default;
-                                clicked => {
-                                    root.page = 0;
-                                    search.focus();
-                                }
+                                enabled: root.page != 0;
+                                mouse-cursor: root.page != 0 ? pointer : default;
+                                clicked => { root.go-back(); }
                             }
                         }
                     }
@@ -454,15 +639,16 @@ export component Popup inherits Window {
                             }
                         }
                         Text {
-                            visible: root.page == 1 || root.query == "";
+                            visible: root.page != 0 || root.query == "";
                             width: 100%;
                             height: 100%;
                             text: root.page == 1 ? "Settings"
+                                : root.page == 2 ? "Clip sets"
                                 : root.filter == 0 ? "Search clipboard history"
                                 : "Search " + root.filter-names[root.filter].to-lowercase();
                             font-size: root.drawer ? 14px : 18px;
-                            font-weight: root.page == 1 ? 600 : 400;
-                            color: root.page == 1 ? root.ink : root.muted;
+                            font-weight: root.page != 0 ? 600 : 400;
+                            color: root.page != 0 ? root.ink : root.muted;
                             vertical-alignment: center;
                         }
                     }
@@ -500,11 +686,24 @@ export component Popup inherits Window {
                     }
                     if !root.drawer: VerticalLayout {
                         alignment: center;
+                        SetsButton {
+                            dark: root.dark;
+                            sets: root.backups;
+                            can-undo: root.can-undo-switch;
+                            about-to-open => { root.sets-menu-opening(); }
+                            save-set => { root.save-set-requested(); }
+                            load-set(p) => { root.restore-backup(p); }
+                            undo-switch => { root.undo-switch(); }
+                            manage-sets => { root.open-backups(); }
+                        }
+                    }
+                    if !root.drawer: VerticalLayout {
+                        alignment: center;
                         FaeButton {
                             icon: "gear";
                             dark: root.dark;
-                            active: root.page == 1;
-                            clicked => { root.page = root.page == 1 ? 0 : 1; }
+                            active: root.page != 0;
+                            clicked => { root.page = root.page != 0 ? 0 : 1; root.confirm-path = ""; }
                         }
                     }
                     if !root.drawer: VerticalLayout {
@@ -774,6 +973,19 @@ export component Popup inherits Window {
                             }
 
                             Rectangle { height: 1px; background: root.line; }
+                            Section { text: "Clip sets"; color: root.ink; }
+                            Text {
+                                text: "Save all clips under a name and switch back to them later, for example one set of snippets per project. Also in the header (layers button) and Ctrl+S.";
+                                color: root.muted;
+                                font-size: 12px;
+                                wrap: word-wrap;
+                            }
+                            HorizontalLayout {
+                                alignment: start;
+                                Button { text: "Manage clip sets…"; clicked => { root.open-backups(); } }
+                            }
+
+                            Rectangle { height: 1px; background: root.line; }
                             Section { text: "Keys"; color: root.ink; }
                             for k in [
                                 { key: "Enter", what: "Paste into the app you were in" },
@@ -781,6 +993,8 @@ export component Popup inherits Window {
                                 { key: "Shift+click, Ctrl+click", what: "Select several clips (also Shift+↑↓); Enter pastes them together" },
                                 { key: "Right-click", what: "Paste, pin or unpin, show in File Explorer, forget" },
                                 { key: "Tab, Shift+Tab", what: "Show only text, links, images, files, colours, code or pinned" },
+                                { key: "Ctrl+A", what: "Select all listed clips" },
+                                { key: "Ctrl+S", what: "Save the clips as a named set" },
                                 { key: "Ctrl+P", what: "Pin or unpin. Pinned clips stay on top and are never removed" },
                                 { key: "Ctrl+Delete", what: "Forget the clip" },
                                 { key: "Ctrl+O", what: "Show a file or image clip in File Explorer" },
@@ -806,6 +1020,100 @@ export component Popup inherits Window {
                             }
                         }
                     }
+                    // Backups page.
+                    if root.page == 2: bsv := ScrollView {
+                        width: 100%;
+                        height: 100%;
+                        VerticalLayout {
+                            width: bsv.visible-width;
+                            alignment: start;
+                            padding: 16px;
+                            padding-top: 12px;
+                            spacing: 10px;
+
+                            Section { text: "Save clips as a set"; color: root.ink; }
+                            Text {
+                                text: "Saves every clip, pinned ones and images included. Saving under an existing name replaces that set.";
+                                color: root.muted;
+                                font-size: 12px;
+                                wrap: word-wrap;
+                            }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                name-edit := LineEdit {
+                                    text <=> root.backup-name;
+                                    placeholder-text: "Set name, e.g. Starfall launch";
+                                    horizontal-stretch: 1;
+                                    accepted(t) => { root.create-backup(t); }
+                                    init => {
+                                        if (root.focus-set-name) {
+                                            root.focus-set-name = false;
+                                            self.focus();
+                                        }
+                                    }
+                                }
+                                Button { text: "Save"; clicked => { root.create-backup(name-edit.text); } }
+                            }
+                            if root.backup-status != "": Text {
+                                text: root.backup-status;
+                                color: root.backup-error ? #e0577f : root.muted;
+                                font-size: 12px;
+                                wrap: word-wrap;
+                            }
+
+                            Rectangle { height: 1px; background: root.line; }
+                            Section { text: "Sets"; color: root.ink; }
+                            Text {
+                                text: "Loading a set replaces the current clips, pinned ones too. Your clips before the switch are kept under Previous clips.";
+                                color: root.muted;
+                                font-size: 12px;
+                                wrap: word-wrap;
+                            }
+                            if root.backups.length == 0: Text {
+                                text: "No sets yet.";
+                                color: root.muted;
+                            }
+                            for b in root.backups: BackupItem {
+                                backup: b;
+                                ink: root.ink;
+                                muted: root.muted;
+                                line: root.line;
+                                confirm-path <=> root.confirm-path;
+                                restore(p) => { root.restore-backup(p); }
+                                delete(p) => { root.delete-backup(p); }
+                                update(p) => { root.update-backup(p); }
+                            }
+
+                            Rectangle { height: 1px; background: root.line; }
+                            Section { text: "Previous clips"; color: root.ink; }
+                            Text {
+                                text: "Your clips as they were before each switch. The newest 5 are kept.";
+                                color: root.muted;
+                                font-size: 12px;
+                                wrap: word-wrap;
+                            }
+                            if root.snapshots.length == 0: Text {
+                                text: "None yet.";
+                                color: root.muted;
+                            }
+                            for b in root.snapshots: BackupItem {
+                                backup: b;
+                                ink: root.ink;
+                                muted: root.muted;
+                                line: root.line;
+                                can-update: false;
+                                confirm-path <=> root.confirm-path;
+                                restore(p) => { root.restore-backup(p); }
+                                delete(p) => { root.delete-backup(p); }
+                            }
+
+                            Rectangle { height: 1px; background: root.line; }
+                            HorizontalLayout {
+                                alignment: start;
+                                Button { text: "Open sets folder"; clicked => { root.open-backups-folder(); } }
+                            }
+                        }
+                    }
                 }
 
                 Rectangle { height: 1px; background: root.line; }
@@ -821,9 +1129,12 @@ export component Popup inherits Window {
                     if root.page == 0 && !root.drawer: Hint { key: "Ctrl+Del"; label: "Forget"; ink: root.ink; muted: root.muted; line: root.line; }
                     if root.page == 0 && root.drawer: Hint { key: "Esc"; label: "Close"; ink: root.ink; muted: root.muted; line: root.line; }
                     if root.page == 1: Hint { key: "Esc"; label: "Back to clips"; ink: root.ink; muted: root.muted; line: root.line; }
+                    if root.page == 2: Hint { key: "Esc"; label: "Back to settings"; ink: root.ink; muted: root.muted; line: root.line; }
                     Text {
                         horizontal-stretch: 1;
-                        text: root.page == 0 && root.marked-count > 1 ? root.marked-count + " selected · " + root.count-label : root.count-label;
+                        text: root.page != 0 ? ""
+                            : root.marked-count > 1 ? root.marked-count + " selected · " + root.count-label
+                            : root.count-label;
                         color: root.muted;
                         font-size: 11.5px;
                         horizontal-alignment: right;

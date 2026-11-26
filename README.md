@@ -8,7 +8,7 @@ Built in Rust with a native [Slint](https://slint.dev) UI, no browser engine.
 
 ## Status
 
-Milestones 1 to 3 of 7:
+Milestones 1 to 3 and 5 of 7:
 
 - Records every copy: text, files and folders, and images (PNG or bitmap),
   with the app it came from. Repeat copies move to the top instead of
@@ -33,7 +33,28 @@ Milestones 1 to 3 of 7:
 - Start with Windows (per-user, no admin), on by default
 - Single instance: launching Wisp again opens the popup
 
-Next: backup and restore of named clip sets (milestone 5).
+Next: installer, update check and first release (milestone 7).
+
+## Clip sets
+
+A clip set is a named copy of all your clips, pinned ones and images
+included, for example one set of snippets per project. The layers button in
+the popup's header opens the sets menu:
+
+- **Save clips as set…** (Ctrl+S) saves the current clips under a name.
+  Saving under an existing name updates that set.
+- Click a set to load it: it replaces the current clips. A set is ticked
+  when the current clips are exactly its clips (same clips, same pins).
+- **Back to previous clips** undoes the last switch. Before every switch Wisp
+  keeps the clips as they were under *Previous clips* (the newest 5).
+- **Manage sets…** lists sets and previous clips to load, update (replace
+  the set with the current clips) or delete.
+
+Each set is one `.wisp` file in `%APPDATA%\Wisp\Clip sets`; copy it to
+another computer's folder to move it. The file is a SQLite database: the
+`clips` and `clip_files` tables as in `wisp.db`, `clip_images` with the PNG
+and thumbnail as blobs, and a `meta` table with the set's name, time and
+format version.
 
 ## Keys in the popup
 
@@ -44,6 +65,8 @@ Next: backup and restore of named clip sets (milestone 5).
 | Enter, double-click | Paste into the app you were in |
 | Shift+Enter | Paste as plain text (files as their paths) |
 | Shift+click, Ctrl+click, Shift+↑↓ | Select several clips; Enter pastes them together (text one per line, files as files) and Ctrl+P, Ctrl+Delete act on all of them |
+| Ctrl+A | Select all listed clips |
+| Ctrl+S | Save the clips as a named set |
 | Right-click | Menu: Paste, Paste as plain text, Pin or Unpin, Show in File Explorer, Forget |
 | Tab, Shift+Tab | Show only text, links, images, files, colours, code or pinned clips |
 | Ctrl+P | Pin or unpin; pinned clips stay on top and are never removed |
@@ -99,7 +122,7 @@ saved to `%APPDATA%\Wisp\settings.json`:
 ## Layout
 
 ```
-crates/wisp-core   clip storage, search, images, placement, settings; no Windows APIs, unit-tested anywhere
+crates/wisp-core   clip storage, search, clip sets, images, placement, settings; no Windows APIs, unit-tested anywhere
 crates/wisp-win    Win32: clipboard listener and paste, single instance, autostart, monitors, caret, focus
 crates/wisp-app    the executable: tray, hotkey, popup wiring
 ui/                Slint UI
