@@ -21,6 +21,8 @@ export struct BackupRow {
     name: string,
     detail: string,
     path: string,
+    count: int,
+    active: bool,
 }
 
 component Kbd inherits Rectangle {
@@ -84,6 +86,18 @@ component FaeButton inherits Rectangle {
         stroke-width: 1.3px;
         fill: transparent;
         commands: "M 0.5 0.5 L 11.5 11.5 M 11.5 0.5 L 0.5 11.5";
+    }
+    if root.icon == "sets": Path {
+        width: 16px;
+        height: 16px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        viewbox-width: 16;
+        viewbox-height: 16;
+        stroke: root.icon-color;
+        stroke-width: 1.3px;
+        fill: transparent;
+        commands: "M 1.5 5.5 L 8 2.2 L 14.5 5.5 L 8 8.8 Z M 1.5 8.4 L 8 11.7 L 14.5 8.4 M 1.5 11.3 L 8 14.6 L 14.5 11.3";
     }
     if root.icon == "gear": Path {
         width: 16px;
@@ -196,28 +210,27 @@ component Segment inherits Rectangle {
     }
 }
 
-// One backup in the list, with Restore and Delete. Both ask once more
-// before they act, in place.
+// One clip set in the list. Load swaps it in at once (the switch can be
+// undone); Delete asks once more, in place.
 component BackupItem inherits Rectangle {
     in property <BackupRow> backup;
     in property <color> ink;
     in property <color> muted;
     in property <color> line;
     in-out property <string> confirm-path;
-    in-out property <bool> confirm-delete;
     callback restore(string);
     callback delete(string);
     property <bool> asking: root.confirm-path == root.backup.path;
     border-radius: 6px;
     border-width: 1px;
-    border-color: root.asking ? #2f6bff : root.line;
+    border-color: root.asking || root.backup.active ? #2f6bff : root.line;
     VerticalLayout {
         padding: 10px;
         spacing: 6px;
         Text { text: root.backup.name; color: root.ink; font-weight: 600; wrap: word-wrap; }
         Text { text: root.backup.detail; color: root.muted; font-size: 12px; wrap: word-wrap; }
         if root.asking: Text {
-            text: root.confirm-delete ? "Delete this backup file?" : "Replace all current clips with this backup?";
+            text: "Delete this set? Its file is removed.";
             color: root.ink;
             wrap: word-wrap;
         }
@@ -225,30 +238,74 @@ component BackupItem inherits Rectangle {
             alignment: start;
             spacing: 8px;
             Button {
-                text: "Restore";
-                clicked => { root.confirm-path = root.backup.path; root.confirm-delete = false; }
+                text: "Load";
+                clicked => { root.restore(root.backup.path); }
             }
             Button {
                 text: "Delete";
-                clicked => { root.confirm-path = root.backup.path; root.confirm-delete = true; }
+                clicked => { root.confirm-path = root.backup.path; }
             }
         }
         if root.asking: HorizontalLayout {
             alignment: start;
             spacing: 8px;
             Button {
-                text: root.confirm-delete ? "Delete" : "Replace clips";
+                text: "Delete";
                 primary: true;
                 clicked => {
                     root.confirm-path = "";
-                    if (root.confirm-delete) {
-                        root.delete(root.backup.path);
-                    } else {
-                        root.restore(root.backup.path);
-                    }
+                    root.delete(root.backup.path);
                 }
             }
             Button { text: "Cancel"; clicked => { root.confirm-path = ""; } }
+        }
+    }
+}
+
+// The clip sets button in the header and its menu.
+component SetsButton inherits Rectangle {
+    in property <bool> dark;
+    in property <[BackupRow]> sets;
+    in property <bool> can-undo;
+    callback about-to-open();
+    callback save-set();
+    callback load-set(string);
+    callback undo-switch();
+    callback manage-sets();
+    width: 32px;
+    height: 32px;
+    menu := ContextMenuArea {
+        FaeButton {
+            icon: "sets";
+            dark: root.dark;
+            clicked => {
+                root.about-to-open();
+                menu.show({ x: 0, y: self.height + 4px });
+            }
+        }
+        Menu {
+            MenuItem {
+                title: "Save clips as set…";
+                activated => { root.save-set(); }
+            }
+            if root.can-undo: MenuItem {
+                title: "Back to previous clips";
+                activated => { root.undo-switch(); }
+            }
+            MenuSeparator { }
+            if root.sets.length == 0: MenuItem {
+                title: "No sets yet";
+                enabled: false;
+            }
+            for s in root.sets: MenuItem {
+                title: (s.active ? "✓  " : "     ") + s.name + "   (" + s.count + ")";
+                activated => { root.load-set(s.path); }
+            }
+            MenuSeparator { }
+            MenuItem {
+                title: "Manage sets…";
+                activated => { root.manage-sets(); }
+            }
         }
     }
 }
@@ -292,16 +349,21 @@ export component Popup inherits Window {
     callback clear-history();
     callback open-data-folder();
 
-    // Backups page.
+    // Clip sets page and menu.
     in property <[BackupRow]> backups;
+    in property <bool> can-undo-switch;
+    // Focus the set name field when the page opens (Ctrl+S, Save clips as set).
+    in-out property <bool> focus-set-name;
     in property <[BackupRow]> snapshots;
     in-out property <string> backup-name;
     in property <string> backup-status;
     in property <bool> backup-error;
     // The backup a Restore or Delete click waits to have confirmed.
     in-out property <string> confirm-path;
-    in-out property <bool> confirm-delete;
     callback open-backups();
+    callback save-set-requested();
+    callback sets-menu-opening();
+    callback undo-switch();
     callback create-backup(string);
     callback restore-backup(string);
     callback delete-backup(string);
@@ -420,6 +482,10 @@ export component Popup inherits Window {
                     }
                     return accept;
                 }
+                if (event.text == "s" || event.text == "S") {
+                    root.save-set-requested();
+                    return accept;
+                }
                 if (event.text == "a" || event.text == "A") {
                     root.select-all();
                     return accept;
@@ -473,6 +539,19 @@ export component Popup inherits Window {
                         font-size: 11.5px;
                         vertical-alignment: center;
                         horizontal-stretch: 1;
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        SetsButton {
+                            dark: root.dark;
+                            sets: root.backups;
+                            can-undo: root.can-undo-switch;
+                            about-to-open => { root.sets-menu-opening(); }
+                            save-set => { root.save-set-requested(); }
+                            load-set(p) => { root.restore-backup(p); }
+                            undo-switch => { root.undo-switch(); }
+                            manage-sets => { root.open-backups(); }
+                        }
                     }
                     VerticalLayout {
                         alignment: center;
@@ -547,7 +626,7 @@ export component Popup inherits Window {
                             width: 100%;
                             height: 100%;
                             text: root.page == 1 ? "Settings"
-                                : root.page == 2 ? "Backups"
+                                : root.page == 2 ? "Clip sets"
                                 : root.filter == 0 ? "Search clipboard history"
                                 : "Search " + root.filter-names[root.filter].to-lowercase();
                             font-size: root.drawer ? 14px : 18px;
@@ -586,6 +665,19 @@ export component Popup inherits Window {
                                 mouse-cursor: pointer;
                                 clicked => { root.set-filter(0); search.focus(); }
                             }
+                        }
+                    }
+                    if !root.drawer: VerticalLayout {
+                        alignment: center;
+                        SetsButton {
+                            dark: root.dark;
+                            sets: root.backups;
+                            can-undo: root.can-undo-switch;
+                            about-to-open => { root.sets-menu-opening(); }
+                            save-set => { root.save-set-requested(); }
+                            load-set(p) => { root.restore-backup(p); }
+                            undo-switch => { root.undo-switch(); }
+                            manage-sets => { root.open-backups(); }
                         }
                     }
                     if !root.drawer: VerticalLayout {
@@ -864,16 +956,16 @@ export component Popup inherits Window {
                             }
 
                             Rectangle { height: 1px; background: root.line; }
-                            Section { text: "Backups"; color: root.ink; }
+                            Section { text: "Clip sets"; color: root.ink; }
                             Text {
-                                text: "Save all clips under a name and bring them back later, for example a set of text snippets for one project.";
+                                text: "Save all clips under a name and switch back to them later, for example one set of snippets per project. Also in the header (layers button) and Ctrl+S.";
                                 color: root.muted;
                                 font-size: 12px;
                                 wrap: word-wrap;
                             }
                             HorizontalLayout {
                                 alignment: start;
-                                Button { text: "Backup and restore…"; clicked => { root.open-backups(); } }
+                                Button { text: "Manage clip sets…"; clicked => { root.open-backups(); } }
                             }
 
                             Rectangle { height: 1px; background: root.line; }
@@ -885,6 +977,7 @@ export component Popup inherits Window {
                                 { key: "Right-click", what: "Paste, pin or unpin, show in File Explorer, forget" },
                                 { key: "Tab, Shift+Tab", what: "Show only text, links, images, files, colours, code or pinned" },
                                 { key: "Ctrl+A", what: "Select all listed clips" },
+                                { key: "Ctrl+S", what: "Save the clips as a named set" },
                                 { key: "Ctrl+P", what: "Pin or unpin. Pinned clips stay on top and are never removed" },
                                 { key: "Ctrl+Delete", what: "Forget the clip" },
                                 { key: "Ctrl+O", what: "Show a file or image clip in File Explorer" },
@@ -921,9 +1014,9 @@ export component Popup inherits Window {
                             padding-top: 12px;
                             spacing: 10px;
 
-                            Section { text: "New backup"; color: root.ink; }
+                            Section { text: "Save clips as a set"; color: root.ink; }
                             Text {
-                                text: "Saves every clip, pinned ones and images included. A backup with the same name is replaced.";
+                                text: "Saves every clip, pinned ones and images included. Saving under an existing name updates that set.";
                                 color: root.muted;
                                 font-size: 12px;
                                 wrap: word-wrap;
@@ -932,11 +1025,17 @@ export component Popup inherits Window {
                                 spacing: 8px;
                                 name-edit := LineEdit {
                                     text <=> root.backup-name;
-                                    placeholder-text: "Name, e.g. Starfall launch";
+                                    placeholder-text: "Set name, e.g. Starfall launch";
                                     horizontal-stretch: 1;
                                     accepted(t) => { root.create-backup(t); }
+                                    init => {
+                                        if (root.focus-set-name) {
+                                            root.focus-set-name = false;
+                                            self.focus();
+                                        }
+                                    }
                                 }
-                                Button { text: "Back up"; clicked => { root.create-backup(name-edit.text); } }
+                                Button { text: "Save"; clicked => { root.create-backup(name-edit.text); } }
                             }
                             if root.backup-status != "": Text {
                                 text: root.backup-status;
@@ -946,15 +1045,15 @@ export component Popup inherits Window {
                             }
 
                             Rectangle { height: 1px; background: root.line; }
-                            Section { text: "Restore"; color: root.ink; }
+                            Section { text: "Sets"; color: root.ink; }
                             Text {
-                                text: "Restoring replaces all current clips, pinned ones too. Wisp saves a safety snapshot of them first.";
+                                text: "Loading a set replaces the current clips, pinned ones too. Your clips before the switch are kept under Previous clips.";
                                 color: root.muted;
                                 font-size: 12px;
                                 wrap: word-wrap;
                             }
                             if root.backups.length == 0: Text {
-                                text: "No backups yet.";
+                                text: "No sets yet.";
                                 color: root.muted;
                             }
                             for b in root.backups: BackupItem {
@@ -963,15 +1062,14 @@ export component Popup inherits Window {
                                 muted: root.muted;
                                 line: root.line;
                                 confirm-path <=> root.confirm-path;
-                                confirm-delete <=> root.confirm-delete;
                                 restore(p) => { root.restore-backup(p); }
                                 delete(p) => { root.delete-backup(p); }
                             }
 
                             Rectangle { height: 1px; background: root.line; }
-                            Section { text: "Safety snapshots"; color: root.ink; }
+                            Section { text: "Previous clips"; color: root.ink; }
                             Text {
-                                text: "Your clips as they were before each restore. The newest 5 are kept.";
+                                text: "Your clips as they were before each switch. The newest 5 are kept.";
                                 color: root.muted;
                                 font-size: 12px;
                                 wrap: word-wrap;
@@ -986,7 +1084,6 @@ export component Popup inherits Window {
                                 muted: root.muted;
                                 line: root.line;
                                 confirm-path <=> root.confirm-path;
-                                confirm-delete <=> root.confirm-delete;
                                 restore(p) => { root.restore-backup(p); }
                                 delete(p) => { root.delete-backup(p); }
                             }
@@ -994,7 +1091,7 @@ export component Popup inherits Window {
                             Rectangle { height: 1px; background: root.line; }
                             HorizontalLayout {
                                 alignment: start;
-                                Button { text: "Open backups folder"; clicked => { root.open-backups-folder(); } }
+                                Button { text: "Open sets folder"; clicked => { root.open-backups-folder(); } }
                             }
                         }
                     }

@@ -46,6 +46,12 @@ pub struct Settings {
     pub max_clips: u32,
     pub capture_images: bool,
     pub capture_files: bool,
+    /// The clip set loaded last (its file), shown ticked in the sets menu.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_set: Option<String>,
+    /// The set that was active before the last switch, for undo.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub previous_set: Option<String>,
 }
 
 impl Default for Settings {
@@ -59,6 +65,8 @@ impl Default for Settings {
             max_clips: 5000,
             capture_images: true,
             capture_files: true,
+            active_set: None,
+            previous_set: None,
         }
     }
 }
@@ -118,6 +126,8 @@ mod tests {
             max_clips: 100,
             capture_images: false,
             capture_files: true,
+            active_set: Some("Starfall launch.wispclips".into()),
+            previous_set: None,
         };
         s.save(&path).unwrap();
         let (loaded, first) = Settings::load(&path);

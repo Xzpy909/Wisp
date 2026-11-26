@@ -195,7 +195,7 @@ impl App {
             Some(Action::Open) => self.show(),
             Some(Action::Backups) => {
                 self.show();
-                self.open_backups();
+                self.open_backups(false);
             }
             Some(Action::Style(s)) => {
                 self.settings.popup_style = s;
@@ -398,34 +398,46 @@ impl App {
         self.refresh();
     }
 
-    fn open_backups(&mut self) {
+    /// The Clip sets page; with `focus_name`, ready to type a new set's name.
+    fn open_backups(&mut self, focus_name: bool) {
         self.popup.set_backup_status("".into());
         self.popup.set_backup_error(false);
         self.popup.set_confirm_path("".into());
+        self.popup.set_focus_set_name(focus_name);
         self.popup.set_page(2);
         self.refresh_backups();
     }
 
     fn refresh_backups(&self) {
         let now = now_secs();
+        let active = self.settings.active_set.clone().unwrap_or_default();
         let rows = |list: Vec<BackupInfo>| -> slint::ModelRc<BackupRow> {
             let rows: Vec<BackupRow> = list
                 .into_iter()
-                .map(|b| BackupRow {
-                    name: b.name.into(),
-                    detail: format!(
-                        "{} · saved {}",
-                        if b.clips == 1 { "1 clip".to_string() } else { format!("{} clips", b.clips) },
-                        saved_ago(b.created_at, now)
-                    )
-                    .into(),
-                    path: b.path.to_string_lossy().into_owned().into(),
+                .map(|b| {
+                    let path = b.path.to_string_lossy().into_owned();
+                    let is_active = path == active;
+                    BackupRow {
+                        detail: format!(
+                            "{} · saved {}{}",
+                            clips_label(b.clips as usize),
+                            saved_ago(b.created_at, now),
+                            if is_active { " · loaded now" } else { "" }
+                        )
+                        .into(),
+                        name: b.name.into(),
+                        count: b.clips as i32,
+                        active: is_active,
+                        path: path.into(),
+                    }
                 })
                 .collect();
             Rc::new(VecModel::from(rows)).into()
         };
-        self.popup.set_backups(rows(backup::list(&backups_dir())));
-        self.popup.set_snapshots(rows(backup::list(&snapshots_dir())));
+        let snapshots = backup::list(&snapshots_dir());
+        self.popup.set_can_undo_switch(!snapshots.is_empty());
+        self.popup.set_backups(rows(backup::list(&sets_dir())));
+        self.popup.set_snapshots(rows(snapshots));
     }
 
     fn backup_status(&self, text: String, error: bool) {
@@ -433,62 +445,96 @@ impl App {
         self.popup.set_backup_error(error);
     }
 
+    /// Save all clips as a named set. The set counts as loaded afterwards.
     fn create_backup(&mut self, name: &str) {
         let Some(store) = self.store.as_ref() else { return };
         let name = name.trim();
         let Some(stem) = backup::file_stem_for(name) else {
-            return self.backup_status("Type a name for the backup first.".into(), true);
+            return self.backup_status("Type a name for the set first.".into(), true);
         };
-        let path = backups_dir().join(format!("{stem}.{}", backup::EXTENSION));
+        let path = sets_dir().join(format!("{stem}.{}", backup::EXTENSION));
         match store.backup_to(&path, name, now_secs()) {
             Ok(n) => {
                 self.backup_status(format!("Saved {} as \u{201c}{name}\u{201d}.", clips_label(n)), false);
                 self.popup.set_backup_name("".into());
+                self.settings.active_set = Some(path.to_string_lossy().into_owned());
+                self.save();
             }
-            Err(e) => self.backup_status(format!("Could not save the backup: {e}"), true),
+            Err(e) => self.backup_status(format!("Could not save the set: {e}"), true),
         }
         self.refresh_backups();
     }
 
-    /// Replace all clips with a backup, after saving them as a safety snapshot.
-    fn restore_backup(&mut self, path: &str) {
+    /// Swap in a set's clips, after keeping the current ones under
+    /// Previous clips.
+    fn load_set(&mut self, path: &str) {
+        let is_snapshot = PathBuf::from(path).parent() == Some(snapshots_dir().as_path());
+        let active = if is_snapshot { None } else { Some(path.to_string()) };
+        self.switch_to(PathBuf::from(path), active);
+    }
+
+    /// Go back to the clips from before the last switch.
+    fn undo_switch(&mut self) {
+        let Some(newest) = backup::list(&snapshots_dir()).into_iter().next() else { return };
+        let previous = self.settings.previous_set.clone();
+        self.switch_to(newest.path, previous);
+    }
+
+    fn switch_to(&mut self, path: PathBuf, new_active: Option<String>) {
         let Some(store) = self.store.as_ref() else { return };
-        let path = PathBuf::from(path);
         let Some(info) = backup::info(&path) else {
-            self.backup_status("That backup can't be read. It may have been moved or damaged.".into(), true);
+            self.backup_status("That set can't be read. It may have been moved or damaged.".into(), true);
             return self.refresh_backups();
         };
         let now = now_secs();
-        let snapshot = snapshots_dir().join(format!("before-restore-{now}.{}", backup::EXTENSION));
-        if let Err(e) = store.backup_to(&snapshot, &format!("Before restoring {}", info.name), now) {
-            return self.backup_status(format!("Nothing was restored: the safety snapshot failed ({e})."), true);
+        let current = self
+            .settings
+            .active_set
+            .as_deref()
+            .and_then(|p| backup::info(std::path::Path::new(p)))
+            .map(|i| i.name);
+        let snapshot_name = match current {
+            Some(n) => format!("{n}, before loading {}", info.name),
+            None => format!("Before loading {}", info.name),
+        };
+        let snapshot = snapshots_dir().join(format!("before-{now}.{}", backup::EXTENSION));
+        if let Err(e) = store.backup_to(&snapshot, &snapshot_name, now) {
+            return self.backup_status(format!("Nothing changed: saving the current clips failed ({e})."), true);
         }
         match store.restore_from(&path) {
             Ok(n) => {
-                self.backup_status(
-                    format!("Restored {} from \u{201c}{}\u{201d}. Your previous clips are in Safety snapshots.", clips_label(n), info.name),
-                    false,
-                );
+                self.backup_status(format!("Loaded {} from \u{201c}{}\u{201d}.", clips_label(n), info.name), false);
+                self.settings.previous_set = self.settings.active_set.take();
+                self.settings.active_set = new_active;
+                self.save();
             }
-            Err(e) => self.backup_status(format!("Nothing was restored: {e}"), true),
+            Err(e) => {
+                let _ = std::fs::remove_file(&snapshot);
+                self.backup_status(format!("Nothing changed: {e}"), true);
+            }
         }
-        // Pruned after the restore, so restoring the oldest snapshot works.
+        // Pruned after loading, so loading the oldest snapshot works.
         backup::prune(&snapshots_dir(), backup::KEEP_SNAPSHOTS);
         self.thumbs.clear();
         self.marked.clear();
+        self.popup.set_selected(0);
         self.refresh();
         self.refresh_backups();
     }
 
     fn delete_backup(&mut self, path: &str) {
-        let path = PathBuf::from(path);
-        // Only files in Wisp's own backup folders.
-        let parent = path.parent().map(|p| p.to_path_buf());
-        if parent == Some(backups_dir()) || parent == Some(snapshots_dir()) {
-            if let Err(e) = std::fs::remove_file(&path) {
-                self.backup_status(format!("Could not delete the backup: {e}"), true);
+        let file = PathBuf::from(path);
+        // Only files in Wisp's own set folders.
+        let parent = file.parent().map(|p| p.to_path_buf());
+        if parent == Some(sets_dir()) || parent == Some(snapshots_dir()) {
+            if let Err(e) = std::fs::remove_file(&file) {
+                self.backup_status(format!("Could not delete the set: {e}"), true);
             } else {
-                self.backup_status("Backup deleted.".into(), false);
+                self.backup_status("Set deleted.".into(), false);
+                if self.settings.active_set.as_deref() == Some(path) {
+                    self.settings.active_set = None;
+                    self.save();
+                }
             }
         }
         self.refresh_backups();
@@ -622,12 +668,12 @@ impl App {
     }
 }
 
-fn backups_dir() -> PathBuf {
-    Settings::dir().join("Backups")
+fn sets_dir() -> PathBuf {
+    Settings::dir().join("Clip sets")
 }
 
 fn snapshots_dir() -> PathBuf {
-    backups_dir().join("Safety snapshots")
+    sets_dir().join("Previous clips")
 }
 
 fn clips_label(n: usize) -> String {
@@ -854,12 +900,15 @@ pub fn run() {
     popup.on_apply_hotkey(|t| with_app(|app| app.apply_hotkey(&t)));
     popup.on_clear_history(|| with_app(|app| app.clear_history()));
     popup.on_filter_changed(|| with_app(|app| app.refresh()));
-    popup.on_open_backups(|| with_app(|app| app.open_backups()));
+    popup.on_open_backups(|| with_app(|app| app.open_backups(false)));
+    popup.on_save_set_requested(|| with_app(|app| app.open_backups(true)));
+    popup.on_sets_menu_opening(|| with_app(|app| app.refresh_backups()));
+    popup.on_undo_switch(|| with_app(|app| app.undo_switch()));
     popup.on_create_backup(|name| with_app(|app| app.create_backup(&name)));
-    popup.on_restore_backup(|p| with_app(|app| app.restore_backup(&p)));
+    popup.on_restore_backup(|p| with_app(|app| app.load_set(&p)));
     popup.on_delete_backup(|p| with_app(|app| app.delete_backup(&p)));
     popup.on_open_backups_folder(|| {
-        let dir = backups_dir();
+        let dir = sets_dir();
         let _ = std::fs::create_dir_all(&dir);
         let _ = std::process::Command::new("explorer").arg(dir).spawn();
     });

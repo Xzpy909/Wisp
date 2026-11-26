@@ -39,7 +39,7 @@ impl Tray {
         let autostart = CheckMenuItem::new("Start with Windows", true, settings.start_with_windows, None);
         let glass = CheckMenuItem::new("Glass effect (uses more memory)", true, settings.glass_effect, None);
         let pause = CheckMenuItem::new("Pause recording", true, false, None);
-        let backups = MenuItem::new("Backup and restore…", true, None);
+        let backups = MenuItem::new("Clip sets…", true, None);
         let quit = MenuItem::new("Quit Wisp", true, None);
 
         let menu = Menu::new();
