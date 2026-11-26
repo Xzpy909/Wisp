@@ -1,6 +1,6 @@
 //! Named backups of the whole clip history.
 //!
-//! A backup is one `.wispclips` file: a small SQLite database holding the
+//! A backup (a "clip set" in the UI) is one `.wisp` file: a small SQLite database holding the
 //! clips, their file lists and their images (as PNG blobs), plus a `meta`
 //! table with the backup's name, time and format version. One file per
 //! backup makes them easy to copy between computers.
@@ -10,7 +10,9 @@ use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-pub const EXTENSION: &str = "wispclips";
+pub const EXTENSION: &str = "wisp";
+/// The extension of early test builds, still read.
+const OLD_EXTENSION: &str = "wispclips";
 const FORMAT_VERSION: i64 = 1;
 
 /// Safety snapshots kept before Wisp deletes the oldest.
@@ -41,6 +43,25 @@ pub struct BackupInfo {
     pub clips: i64,
     /// Unix seconds.
     pub created_at: i64,
+    /// Identifies the clips it holds; see [`Store::fingerprint`].
+    pub fingerprint: u64,
+}
+
+/// Fingerprint of the clips in a database: which clips (by content hash)
+/// and which of them are pinned, ignoring order and times.
+fn fingerprint_of(conn: &Connection) -> rusqlite::Result<u64> {
+    let mut st = conn.prepare("SELECT hash, pinned FROM clips ORDER BY hash")?;
+    let mut rows = st.query([])?;
+    let mut h: u64 = 0xcbf29ce484222325;
+    while let Some(r) = rows.next()? {
+        let hash: i64 = r.get(0)?;
+        let pinned: i64 = r.get(1)?;
+        for b in hash.to_le_bytes().into_iter().chain([(pinned != 0) as u8]) {
+            h ^= b as u64;
+            h = h.wrapping_mul(0x100000001b3);
+        }
+    }
+    Ok(h)
 }
 
 /// Turn a typed name into a safe file name: no characters Windows forbids,
@@ -81,7 +102,8 @@ pub fn info(path: &Path) -> Option<BackupInfo> {
     });
     let created_at = meta("created_at").and_then(|v| v.parse().ok()).unwrap_or(0);
     let clips = conn.query_row("SELECT COUNT(*) FROM clips", [], |r| r.get(0)).ok()?;
-    Some(BackupInfo { name, path: path.to_path_buf(), clips, created_at })
+    let fingerprint = fingerprint_of(&conn).ok()?;
+    Some(BackupInfo { name, path: path.to_path_buf(), clips, created_at, fingerprint })
 }
 
 /// Backups in `dir`, newest first. Files that aren't Wisp backups are skipped.
@@ -90,7 +112,9 @@ pub fn list(dir: &Path) -> Vec<BackupInfo> {
     let mut out: Vec<BackupInfo> = entries
         .filter_map(|e| e.ok())
         .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case(EXTENSION)))
+        .filter(|p| {
+            p.extension().is_some_and(|x| x.eq_ignore_ascii_case(EXTENSION) || x.eq_ignore_ascii_case(OLD_EXTENSION))
+        })
         .filter_map(|p| info(&p))
         .collect();
     out.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| a.name.cmp(&b.name)));
@@ -105,6 +129,12 @@ pub fn prune(dir: &Path, keep: usize) {
 }
 
 impl Store {
+    /// Fingerprint of the current clips; equal to a backup's when it holds
+    /// the same clips with the same ones pinned.
+    pub fn fingerprint(&self) -> Result<u64> {
+        Ok(fingerprint_of(self.conn())?)
+    }
+
     /// Save every clip to a backup file at `path`, replacing any file there.
     /// Returns the number of clips saved.
     pub fn backup_to(&self, path: &Path, name: &str, now: i64) -> Result<usize> {
@@ -113,7 +143,7 @@ impl Store {
         }
         // Write beside the target and rename, so a failed backup never
         // leaves a half-written file under the real name.
-        let tmp = path.with_extension("wispclips-partial");
+        let tmp = path.with_extension("wisp-partial");
         let _ = std::fs::remove_file(&tmp);
         let result = self.write_backup(&tmp, name, now);
         match result {
@@ -384,7 +414,7 @@ mod tests {
         let img = s.insert(&image(90), 4).unwrap();
         let png_before = s.content(img).unwrap();
 
-        let file = dir.join("backups").join("Work.wispclips");
+        let file = dir.join("backups").join("Work.wisp");
         assert_eq!(s.backup_to(&file, "Work", 100).unwrap(), 4);
         let i = info(&file).unwrap();
         assert_eq!((i.name.as_str(), i.clips, i.created_at), ("Work", 4, 100));
@@ -409,14 +439,46 @@ mod tests {
     }
 
     #[test]
+    fn fingerprint_matches_same_clips_only() {
+        let dir = temp_dir();
+        let s = Store::open(&dir.join("data")).unwrap();
+        s.insert(&text("Starfall"), 1).unwrap();
+        let b = s.insert(&text("Moonforge"), 2).unwrap();
+        let file = dir.join("Set.wisp");
+        s.backup_to(&file, "Set", 3).unwrap();
+        assert_eq!(info(&file).unwrap().fingerprint, s.fingerprint().unwrap());
+        // Order and times don't matter.
+        s.touch(b, 10).unwrap();
+        assert_eq!(info(&file).unwrap().fingerprint, s.fingerprint().unwrap());
+        // Pinning, adding or removing does.
+        s.set_pinned(b, true).unwrap();
+        assert_ne!(info(&file).unwrap().fingerprint, s.fingerprint().unwrap());
+        s.set_pinned(b, false).unwrap();
+        s.insert(&text("Mirelle"), 11).unwrap();
+        assert_ne!(info(&file).unwrap().fingerprint, s.fingerprint().unwrap());
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn old_extension_is_still_listed() {
+        let dir = temp_dir();
+        let s = Store::open(&dir.join("data")).unwrap();
+        s.insert(&text("a"), 1).unwrap();
+        s.backup_to(&dir.join("sets").join("Old.wispclips"), "Old", 1).unwrap();
+        s.backup_to(&dir.join("sets").join("New.wisp"), "New", 2).unwrap();
+        assert_eq!(list(&dir.join("sets")).len(), 2);
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
     fn bad_backup_changes_nothing() {
         let dir = temp_dir();
         let s = Store::open(&dir.join("data")).unwrap();
         s.insert(&text("keep me"), 1).unwrap();
-        let junk = dir.join("junk.wispclips");
+        let junk = dir.join("junk.wisp");
         std::fs::write(&junk, b"not a database").unwrap();
         assert!(s.restore_from(&junk).is_err());
-        assert!(s.restore_from(&dir.join("missing.wispclips")).is_err());
+        assert!(s.restore_from(&dir.join("missing.wisp")).is_err());
         assert_eq!(texts(&s), ["keep me"]);
         std::fs::remove_dir_all(dir).ok();
     }
@@ -428,7 +490,7 @@ mod tests {
         s.insert(&text("a"), 1).unwrap();
         let b = dir.join("b");
         for (n, t) in [("Old", 10), ("Newest", 30), ("Middle", 20)] {
-            s.backup_to(&b.join(format!("{n}.wispclips")), n, t).unwrap();
+            s.backup_to(&b.join(format!("{n}.wisp")), n, t).unwrap();
         }
         std::fs::write(b.join("notes.txt"), "x").unwrap();
         let names: Vec<String> = list(&b).into_iter().map(|i| i.name).collect();
@@ -444,7 +506,7 @@ mod tests {
         let dir = temp_dir();
         let s = Store::open(&dir.join("data")).unwrap();
         s.insert(&text("one"), 1).unwrap();
-        let f = dir.join("Same.wispclips");
+        let f = dir.join("Same.wisp");
         s.backup_to(&f, "Same", 1).unwrap();
         s.insert(&text("two"), 2).unwrap();
         s.backup_to(&f, "Same", 2).unwrap();

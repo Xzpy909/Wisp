@@ -211,16 +211,21 @@ component Segment inherits Rectangle {
 }
 
 // One clip set in the list. Load swaps it in at once (the switch can be
-// undone); Delete asks once more, in place.
+// undone); Update and Delete ask once more, in place.
 component BackupItem inherits Rectangle {
     in property <BackupRow> backup;
+    in property <bool> can-update: true;
     in property <color> ink;
     in property <color> muted;
     in property <color> line;
+    // "update:<path>" or "delete:<path>" while a click waits to be confirmed.
     in-out property <string> confirm-path;
     callback restore(string);
+    callback update(string);
     callback delete(string);
-    property <bool> asking: root.confirm-path == root.backup.path;
+    property <bool> asking-update: root.confirm-path == "update:" + root.backup.path;
+    property <bool> asking-delete: root.confirm-path == "delete:" + root.backup.path;
+    property <bool> asking: root.asking-update || root.asking-delete;
     border-radius: 6px;
     border-width: 1px;
     border-color: root.asking || root.backup.active ? #2f6bff : root.line;
@@ -230,7 +235,7 @@ component BackupItem inherits Rectangle {
         Text { text: root.backup.name; color: root.ink; font-weight: 600; wrap: word-wrap; }
         Text { text: root.backup.detail; color: root.muted; font-size: 12px; wrap: word-wrap; }
         if root.asking: Text {
-            text: "Delete this set? Its file is removed.";
+            text: root.asking-delete ? "Delete this set? Its file is removed." : "Replace this set with the current clips?";
             color: root.ink;
             wrap: word-wrap;
         }
@@ -239,22 +244,33 @@ component BackupItem inherits Rectangle {
             spacing: 8px;
             Button {
                 text: "Load";
+                enabled: !root.backup.active;
                 clicked => { root.restore(root.backup.path); }
+            }
+            if root.can-update: Button {
+                text: "Update";
+                enabled: !root.backup.active;
+                clicked => { root.confirm-path = "update:" + root.backup.path; }
             }
             Button {
                 text: "Delete";
-                clicked => { root.confirm-path = root.backup.path; }
+                clicked => { root.confirm-path = "delete:" + root.backup.path; }
             }
         }
         if root.asking: HorizontalLayout {
             alignment: start;
             spacing: 8px;
             Button {
-                text: "Delete";
+                text: root.asking-delete ? "Delete" : "Update set";
                 primary: true;
                 clicked => {
-                    root.confirm-path = "";
-                    root.delete(root.backup.path);
+                    if (root.asking-delete) {
+                        root.confirm-path = "";
+                        root.delete(root.backup.path);
+                    } else {
+                        root.confirm-path = "";
+                        root.update(root.backup.path);
+                    }
                 }
             }
             Button { text: "Cancel"; clicked => { root.confirm-path = ""; } }
@@ -366,6 +382,7 @@ export component Popup inherits Window {
     callback undo-switch();
     callback create-backup(string);
     callback restore-backup(string);
+    callback update-backup(string);
     callback delete-backup(string);
     callback open-backups-folder();
     // Clip actions, by clip id.
@@ -1016,7 +1033,7 @@ export component Popup inherits Window {
 
                             Section { text: "Save clips as a set"; color: root.ink; }
                             Text {
-                                text: "Saves every clip, pinned ones and images included. Saving under an existing name updates that set.";
+                                text: "Saves every clip, pinned ones and images included. Saving under an existing name replaces that set.";
                                 color: root.muted;
                                 font-size: 12px;
                                 wrap: word-wrap;
@@ -1064,6 +1081,7 @@ export component Popup inherits Window {
                                 confirm-path <=> root.confirm-path;
                                 restore(p) => { root.restore-backup(p); }
                                 delete(p) => { root.delete-backup(p); }
+                                update(p) => { root.update-backup(p); }
                             }
 
                             Rectangle { height: 1px; background: root.line; }
@@ -1083,6 +1101,7 @@ export component Popup inherits Window {
                                 ink: root.ink;
                                 muted: root.muted;
                                 line: root.line;
+                                can-update: false;
                                 confirm-path <=> root.confirm-path;
                                 restore(p) => { root.restore-backup(p); }
                                 delete(p) => { root.delete-backup(p); }

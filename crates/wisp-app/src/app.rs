@@ -408,27 +408,31 @@ impl App {
         self.refresh_backups();
     }
 
+    fn current_fingerprint(&self) -> Option<u64> {
+        self.store.as_ref().and_then(|s| s.fingerprint().ok())
+    }
+
     fn refresh_backups(&self) {
         let now = now_secs();
-        let active = self.settings.active_set.clone().unwrap_or_default();
+        let current = self.current_fingerprint();
         let rows = |list: Vec<BackupInfo>| -> slint::ModelRc<BackupRow> {
             let rows: Vec<BackupRow> = list
                 .into_iter()
                 .map(|b| {
-                    let path = b.path.to_string_lossy().into_owned();
-                    let is_active = path == active;
+                    // Ticked when the current clips are exactly this set's.
+                    let same = current == Some(b.fingerprint);
                     BackupRow {
                         detail: format!(
                             "{} · saved {}{}",
                             clips_label(b.clips as usize),
                             saved_ago(b.created_at, now),
-                            if is_active { " · loaded now" } else { "" }
+                            if same { " · same as current clips" } else { "" }
                         )
                         .into(),
                         name: b.name.into(),
                         count: b.clips as i32,
-                        active: is_active,
-                        path: path.into(),
+                        active: same,
+                        path: b.path.to_string_lossy().into_owned().into(),
                     }
                 })
                 .collect();
@@ -445,55 +449,76 @@ impl App {
         self.popup.set_backup_error(error);
     }
 
-    /// Save all clips as a named set. The set counts as loaded afterwards.
+    /// Save all clips as a named set, replacing a set of the same name.
     fn create_backup(&mut self, name: &str) {
-        let Some(store) = self.store.as_ref() else { return };
         let name = name.trim();
         let Some(stem) = backup::file_stem_for(name) else {
             return self.backup_status("Type a name for the set first.".into(), true);
         };
         let path = sets_dir().join(format!("{stem}.{}", backup::EXTENSION));
-        match store.backup_to(&path, name, now_secs()) {
+        if self.write_set(&path, name) {
+            self.popup.set_backup_name("".into());
+        }
+    }
+
+    /// Overwrite an existing set with the current clips, keeping its name.
+    fn update_backup(&mut self, path: &str) {
+        let old = PathBuf::from(path);
+        let Some(info) = backup::info(&old) else {
+            self.backup_status("That set can't be read. It may have been moved or damaged.".into(), true);
+            return self.refresh_backups();
+        };
+        // Sets from early builds move to the current extension.
+        let new = old.with_extension(backup::EXTENSION);
+        if self.write_set(&new, &info.name) && new != old {
+            let _ = std::fs::remove_file(&old);
+            self.refresh_backups();
+        }
+    }
+
+    fn write_set(&mut self, path: &std::path::Path, name: &str) -> bool {
+        let Some(store) = self.store.as_ref() else { return false };
+        let ok = match store.backup_to(path, name, now_secs()) {
             Ok(n) => {
                 self.backup_status(format!("Saved {} as \u{201c}{name}\u{201d}.", clips_label(n)), false);
-                self.popup.set_backup_name("".into());
-                self.settings.active_set = Some(path.to_string_lossy().into_owned());
-                self.save();
+                true
             }
-            Err(e) => self.backup_status(format!("Could not save the set: {e}"), true),
-        }
+            Err(e) => {
+                self.backup_status(format!("Could not save the set: {e}"), true);
+                false
+            }
+        };
         self.refresh_backups();
+        ok
     }
 
     /// Swap in a set's clips, after keeping the current ones under
     /// Previous clips.
     fn load_set(&mut self, path: &str) {
-        let is_snapshot = PathBuf::from(path).parent() == Some(snapshots_dir().as_path());
-        let active = if is_snapshot { None } else { Some(path.to_string()) };
-        self.switch_to(PathBuf::from(path), active);
+        self.switch_to(PathBuf::from(path));
     }
 
     /// Go back to the clips from before the last switch.
     fn undo_switch(&mut self) {
         let Some(newest) = backup::list(&snapshots_dir()).into_iter().next() else { return };
-        let previous = self.settings.previous_set.clone();
-        self.switch_to(newest.path, previous);
+        self.switch_to(newest.path);
     }
 
-    fn switch_to(&mut self, path: PathBuf, new_active: Option<String>) {
-        let Some(store) = self.store.as_ref() else { return };
+    fn switch_to(&mut self, path: PathBuf) {
         let Some(info) = backup::info(&path) else {
             self.backup_status("That set can't be read. It may have been moved or damaged.".into(), true);
             return self.refresh_backups();
         };
+        let current = self.current_fingerprint();
+        if current == Some(info.fingerprint) {
+            self.backup_status(format!("The current clips are already \u{201c}{}\u{201d}.", info.name), false);
+            return self.refresh_backups();
+        }
+        let Some(store) = self.store.as_ref() else { return };
         let now = now_secs();
-        let current = self
-            .settings
-            .active_set
-            .as_deref()
-            .and_then(|p| backup::info(std::path::Path::new(p)))
-            .map(|i| i.name);
-        let snapshot_name = match current {
+        // Name the snapshot after the set the clips match, if any.
+        let matching = backup::list(&sets_dir()).into_iter().find(|b| Some(b.fingerprint) == current).map(|b| b.name);
+        let snapshot_name = match matching {
             Some(n) => format!("{n}, before loading {}", info.name),
             None => format!("Before loading {}", info.name),
         };
@@ -504,9 +529,6 @@ impl App {
         match store.restore_from(&path) {
             Ok(n) => {
                 self.backup_status(format!("Loaded {} from \u{201c}{}\u{201d}.", clips_label(n), info.name), false);
-                self.settings.previous_set = self.settings.active_set.take();
-                self.settings.active_set = new_active;
-                self.save();
             }
             Err(e) => {
                 let _ = std::fs::remove_file(&snapshot);
@@ -531,10 +553,6 @@ impl App {
                 self.backup_status(format!("Could not delete the set: {e}"), true);
             } else {
                 self.backup_status("Set deleted.".into(), false);
-                if self.settings.active_set.as_deref() == Some(path) {
-                    self.settings.active_set = None;
-                    self.save();
-                }
             }
         }
         self.refresh_backups();
@@ -906,6 +924,7 @@ pub fn run() {
     popup.on_undo_switch(|| with_app(|app| app.undo_switch()));
     popup.on_create_backup(|name| with_app(|app| app.create_backup(&name)));
     popup.on_restore_backup(|p| with_app(|app| app.load_set(&p)));
+    popup.on_update_backup(|p| with_app(|app| app.update_backup(&p)));
     popup.on_delete_backup(|p| with_app(|app| app.delete_backup(&p)));
     popup.on_open_backups_folder(|| {
         let dir = sets_dir();

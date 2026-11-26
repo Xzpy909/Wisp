@@ -43,13 +43,14 @@ the popup's header opens the sets menu:
 
 - **Save clips as set…** (Ctrl+S) saves the current clips under a name.
   Saving under an existing name updates that set.
-- Click a set to load it: it replaces the current clips. The set loaded last
-  is ticked.
+- Click a set to load it: it replaces the current clips. A set is ticked
+  when the current clips are exactly its clips (same clips, same pins).
 - **Back to previous clips** undoes the last switch. Before every switch Wisp
   keeps the clips as they were under *Previous clips* (the newest 5).
-- **Manage sets…** lists sets and previous clips to load or delete.
+- **Manage sets…** lists sets and previous clips to load, update (replace
+  the set with the current clips) or delete.
 
-Each set is one `.wispclips` file in `%APPDATA%\Wisp\Clip sets`; copy it to
+Each set is one `.wisp` file in `%APPDATA%\Wisp\Clip sets`; copy it to
 another computer's folder to move it. The file is a SQLite database: the
 `clips` and `clip_files` tables as in `wisp.db`, `clip_images` with the PNG
 and thumbnail as blobs, and a `meta` table with the set's name, time and
