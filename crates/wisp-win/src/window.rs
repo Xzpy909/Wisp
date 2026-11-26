@@ -11,8 +11,9 @@ use windows_sys::Win32::UI::Controls::MARGINS;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::SetFocus;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     BringWindowToTop, GetForegroundWindow, GetWindowLongPtrW, GetWindowThreadProcessId,
-    IsWindow, MessageBoxW, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, HWND_TOPMOST,
+    IsWindow, MessageBoxW, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, GWL_STYLE, HWND_TOPMOST,
     MB_ICONWARNING, MB_OK, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_FRAMECHANGED, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
+    WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_SYSMENU,
 };
 
 pub fn foreground_window() -> Hwnd {
@@ -27,6 +28,12 @@ pub fn prepare_popup(hwnd: Hwnd, dark: bool) {
         let ex = GetWindowLongPtrW(h, GWL_EXSTYLE);
         let ex = (ex | WS_EX_TOOLWINDOW as isize) & !(WS_EX_APPWINDOW as isize);
         SetWindowLongPtrW(h, GWL_EXSTYLE, ex);
+        // With the DWM frame extended over the whole window (for acrylic),
+        // Windows would draw its own caption buttons in the corner. Without a
+        // system menu it draws none; Wisp has its own close button.
+        let st = GetWindowLongPtrW(h, GWL_STYLE);
+        let st = st & !((WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX) as isize);
+        SetWindowLongPtrW(h, GWL_STYLE, st);
         SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED);
         let corner = DWMWCP_ROUND;
         DwmSetWindowAttribute(h, DWMWA_WINDOW_CORNER_PREFERENCE as u32, (&corner as *const i32).cast(), 4);

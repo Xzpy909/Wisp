@@ -33,6 +33,37 @@ component Hint inherits HorizontalLayout {
     Text { text: root.label; color: root.muted; font-size: 11.5px; vertical-alignment: center; }
 }
 
+// Round close button: dark disc, thin rose ring, light cross.
+component CloseButton inherits Rectangle {
+    in property <bool> dark;
+    callback clicked();
+    property <color> rose: #e0577f;
+    width: 22px;
+    height: 22px;
+    border-radius: self.width / 2;
+    border-width: 1.5px;
+    border-color: touch.has-hover ? root.rose : root.rose.with-alpha(0.75);
+    background: touch.pressed ? root.rose.with-alpha(0.35)
+        : touch.has-hover ? root.rose.with-alpha(0.2)
+        : (root.dark ? #1b1b1f : #2a2a30);
+    Path {
+        width: 8px;
+        height: 8px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        viewbox-width: 8;
+        viewbox-height: 8;
+        stroke: #f4f4f6;
+        stroke-width: 1.5px;
+        fill: transparent;
+        commands: "M 0.5 0.5 L 7.5 7.5 M 7.5 0.5 L 0.5 7.5";
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
 export component Popup inherits Window {
     in property <bool> drawer: false;
     in property <bool> dark: false;
@@ -95,6 +126,10 @@ export component Popup inherits Window {
                         vertical-alignment: center;
                         horizontal-stretch: 1;
                     }
+                    VerticalLayout {
+                        alignment: center;
+                        CloseButton { dark: root.dark; clicked => { root.dismiss(); } }
+                    }
                 }
 
                 HorizontalLayout {
@@ -136,6 +171,10 @@ export component Popup inherits Window {
                             color: root.muted;
                             vertical-alignment: center;
                         }
+                    }
+                    if !root.drawer: VerticalLayout {
+                        alignment: center;
+                        CloseButton { dark: root.dark; clicked => { root.dismiss(); } }
                     }
                 }
 
