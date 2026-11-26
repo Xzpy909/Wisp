@@ -37,7 +37,7 @@ pub fn decode_png(bytes: &[u8]) -> Option<Rgba> {
     let (w, h) = (info.width, info.height);
     let pixels = match info.color_type {
         png::ColorType::Rgba => buf,
-        png::ColorType::GrayscaleAlpha => buf.chunks_exact(2).flat_map(|p| [p[0], p[0], p[0], p[1]]).collect(),
+        png::ColorType::GrayscaleAlpha => buf.as_chunks::<2>().0.iter().flat_map(|&[g, a]| [g, g, g, a]).collect(),
         _ => return None,
     };
     Some(Rgba { width: w, height: h, pixels })
@@ -131,7 +131,7 @@ pub fn from_dib(dib: &[u8]) -> Option<Rgba> {
     }
     // Most apps leave the fourth byte at zero; treat that as opaque.
     if bpp == 32 && !any_alpha {
-        pixels.chunks_exact_mut(4).for_each(|p| p[3] = 255);
+        pixels.as_chunks_mut::<4>().0.iter_mut().for_each(|p| p[3] = 255);
     }
     Some(Rgba { width: w as u32, height: h as u32, pixels })
 }
@@ -197,7 +197,7 @@ mod tests {
 
     fn checker(w: u32, h: u32) -> Rgba {
         let pixels = (0..w * h)
-            .flat_map(|i| if (i % w + i / w) % 2 == 0 { [255, 0, 0, 255] } else { [0, 0, 255, 255] })
+            .flat_map(|i| if (i % w + i / w).is_multiple_of(2) { [255, 0, 0, 255] } else { [0, 0, 255, 255] })
             .collect();
         Rgba { width: w, height: h, pixels }
     }

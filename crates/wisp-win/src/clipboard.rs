@@ -194,7 +194,7 @@ fn read_clipboard(hwnd: HWND, opts: &CaptureOptions) -> Option<Captured> {
 
 fn read_text() -> Option<String> {
     let bytes = global_bytes(CF_UNICODETEXT as u32)?;
-    let units: Vec<u16> = bytes.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+    let units: Vec<u16> = bytes.as_chunks::<2>().0.iter().map(|&c| u16::from_le_bytes(c)).collect();
     let end = units.iter().position(|&u| u == 0).unwrap_or(units.len());
     Some(String::from_utf16_lossy(&units[..end]))
 }
