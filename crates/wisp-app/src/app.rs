@@ -13,15 +13,15 @@ use global_hotkey::hotkey::HotKey;
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use slint::{
-    ComponentHandle, Image, PhysicalPosition, PhysicalSize, Rgba8Pixel, SharedPixelBuffer, Timer, TimerMode,
+    ComponentHandle, Image, Model, PhysicalPosition, PhysicalSize, Rgba8Pixel, SharedPixelBuffer, Timer, TimerMode,
     VecModel,
 };
 use tray_icon::menu::MenuEvent;
 use tray_icon::{MouseButton, MouseButtonState, TrayIconEvent};
 use wisp_core::clip::{now_secs, relative_time};
-use wisp_core::{images, popup_rect, Clip, Kind, PopupStyle, Settings, Store};
+use wisp_core::{images, popup_rect, Clip, ClipContent, Filter, Kind, PopupStyle, Settings, Store};
 use wisp_win::clipboard::{self, CaptureOptions};
-use wisp_win::{autostart, instance, screen, window, Hwnd};
+use wisp_win::{autostart, instance, paste, screen, window, Hwnd};
 
 /// Most clips the popup lists at once.
 const LIST_LIMIT: usize = 200;
@@ -106,6 +106,7 @@ impl App {
 
         self.popup.set_drawer(style == PopupStyle::Drawer);
         self.popup.set_query("".into());
+        self.popup.set_filter(0);
         self.popup.set_page(0);
         self.popup.set_selected(0);
         self.popup.set_dark(window::apps_use_dark_theme());
@@ -223,11 +224,12 @@ impl App {
         }
     }
 
-    /// Reload the clip list for the current search text.
+    /// Reload the clip list for the current search text and filter.
     fn refresh(&mut self) {
         let Some(store) = self.store.as_ref() else { return };
         let query = self.popup.get_query().to_string();
-        let clips = store.search(&query, LIST_LIMIT).unwrap_or_default();
+        let filter = Filter::from_index(self.popup.get_filter());
+        let (clips, matches) = store.search(&query, filter, LIST_LIMIT).unwrap_or_default();
         let total = store.count().unwrap_or(0);
         let now = now_secs();
         if self.thumbs.len() > 4 * LIST_LIMIT {
@@ -237,18 +239,77 @@ impl App {
             .iter()
             .map(|c| clip_row(c, now, store, &mut self.thumbs))
             .collect();
-        let shown = rows.len();
+        let shown = rows.len() as i32;
         self.popup.set_clips(Rc::new(VecModel::from(rows)).into());
-        if self.popup.get_selected() as usize >= shown {
-            self.popup.set_selected(0);
+        if self.popup.get_selected() >= shown {
+            self.popup.set_selected((shown - 1).max(0));
         }
-        let label = match (query.trim().is_empty(), total) {
+        let narrowed = !query.trim().is_empty() || filter != Filter::All;
+        let label = match (narrowed, total) {
             (_, 0) => String::new(),
-            (true, 1) => "1 clip".into(),
-            (true, n) => format!("{n} clips"),
-            (false, n) => format!("{shown} of {n}"),
+            (false, 1) => "1 clip".into(),
+            (false, n) => format!("{n} clips"),
+            (true, n) => format!("{matches} of {n}"),
         };
         self.popup.set_count_label(label.into());
+    }
+
+    /// Select the row showing clip `id`, if it is listed.
+    fn select_clip(&self, id: i64) {
+        if let Some(i) = self.popup.get_clips().iter().position(|r| r.id as i64 == id) {
+            self.popup.set_selected(i as i32);
+        }
+    }
+
+    /// Put the clip on the clipboard, return to the previous app and press
+    /// Ctrl+V there. The clip moves to the top of the history.
+    fn paste(&mut self, id: i64, plain: bool) {
+        let Some(store) = self.store.as_ref() else { return };
+        let content = match store.content(id) {
+            Ok(Some(c)) => c,
+            Ok(None) => return self.refresh(),
+            Err(e) => return window::warn("Wisp", &format!("Could not read the clip:\n{e}")),
+        };
+        if let Err(e) = paste::write(&content, plain) {
+            return window::warn("Wisp", &format!("Could not put the clip on the clipboard: {e}."));
+        }
+        let _ = store.touch(id, now_secs());
+        self.hide(true);
+        // Give the previous window a moment to take focus back.
+        Timer::single_shot(Duration::from_millis(60), paste::send_ctrl_v);
+    }
+
+    fn toggle_pin(&mut self, id: i64) {
+        let Some(store) = self.store.as_ref() else { return };
+        let pinned = self.popup.get_clips().iter().find(|r| r.id as i64 == id).is_some_and(|r| r.pinned);
+        if store.set_pinned(id, !pinned).is_ok() {
+            self.refresh();
+            self.select_clip(id);
+            self.popup.invoke_scroll_to_selected();
+        }
+    }
+
+    fn forget(&mut self, id: i64) {
+        let Some(store) = self.store.as_ref() else { return };
+        if let Err(e) = store.delete(id) {
+            return window::warn("Wisp", &format!("Could not forget the clip:\n{e}"));
+        }
+        self.thumbs.remove(&id);
+        self.refresh();
+    }
+
+    /// Show a file or image clip in File Explorer.
+    fn reveal(&mut self, id: i64) {
+        let Some(store) = self.store.as_ref() else { return };
+        let path = match store.content(id) {
+            Ok(Some(ClipContent::Files(paths))) => paths.into_iter().next(),
+            Ok(Some(ClipContent::Image { .. })) => store.image_path(id).ok().flatten(),
+            _ => None,
+        };
+        if let Some(p) = path {
+            self.hide(false);
+            paste::reveal(&p);
+        }
     }
 
     /// A new clip was recorded on the clipboard thread.
@@ -400,6 +461,7 @@ fn clip_row(c: &Clip, now: i64, store: &Store, thumbs: &mut HashMap<i64, Image>)
     }
     meta.push_str(&relative_time(c.created_at, now));
     ClipRow {
+        id: c.id as i32,
         kind: c.kind.as_str().into(),
         title: c.title().into(),
         meta: meta.into(),
@@ -557,6 +619,11 @@ pub fn run() {
     });
     popup.on_apply_hotkey(|t| with_app(|app| app.apply_hotkey(&t)));
     popup.on_clear_history(|| with_app(|app| app.clear_history()));
+    popup.on_filter_changed(|| with_app(|app| app.refresh()));
+    popup.on_paste(|id, plain| with_app(|app| app.paste(id as i64, plain)));
+    popup.on_toggle_pin(|id| with_app(|app| app.toggle_pin(id as i64)));
+    popup.on_forget(|id| with_app(|app| app.forget(id as i64)));
+    popup.on_reveal(|id| with_app(|app| app.reveal(id as i64)));
     popup.on_open_data_folder(|| {
         let _ = std::process::Command::new("explorer").arg(Settings::dir()).spawn();
     });

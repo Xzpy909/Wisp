@@ -5,6 +5,7 @@
 pub mod autostart;
 pub mod clipboard;
 pub mod instance;
+pub mod paste;
 pub mod screen;
 pub mod window;
 

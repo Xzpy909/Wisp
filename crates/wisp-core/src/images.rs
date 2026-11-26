@@ -5,7 +5,7 @@ use std::io::Cursor;
 /// Longest side of a stored thumbnail, in pixels.
 pub const THUMB_MAX: u32 = 160;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Rgba {
     pub width: u32,
     pub height: u32,
@@ -136,8 +136,38 @@ pub fn from_dib(dib: &[u8]) -> Option<Rgba> {
     Some(Rgba { width: w as u32, height: h as u32, pixels })
 }
 
+/// Encode as a 32-bit bottom-up `CF_DIB` (BITMAPINFOHEADER + BGRA rows), the
+/// image format every Windows app can paste.
+pub fn to_dib(img: &Rgba) -> Vec<u8> {
+    let (w, h) = (img.width as usize, img.height as usize);
+    let size = w * h * 4;
+    let mut out = Vec::with_capacity(40 + size);
+    out.extend_from_slice(&40u32.to_le_bytes());
+    out.extend_from_slice(&(img.width as i32).to_le_bytes());
+    out.extend_from_slice(&(img.height as i32).to_le_bytes());
+    out.extend_from_slice(&1u16.to_le_bytes()); // planes
+    out.extend_from_slice(&32u16.to_le_bytes()); // bits per pixel
+    out.extend_from_slice(&0u32.to_le_bytes()); // BI_RGB
+    out.extend_from_slice(&(size as u32).to_le_bytes());
+    out.extend_from_slice(&[0u8; 16]); // resolution and palette: unused
+    for y in (0..h).rev() {
+        for p in img.pixels[y * w * 4..(y + 1) * w * 4].as_chunks::<4>().0 {
+            out.extend_from_slice(&[p[2], p[1], p[0], p[3]]);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn dib_round_trip() {
+        let img = Rgba { width: 3, height: 2, pixels: (0..24).map(|i| i as u8 * 10).collect() };
+        let dib = to_dib(&img);
+        assert_eq!(dib.len(), 40 + 24);
+        assert_eq!(from_dib(&dib).unwrap(), img);
+    }
+
     use super::*;
 
     fn dib(w: i32, h: i32, bpp: u16, compression: u32, pixel_rows: &[&[u8]]) -> Vec<u8> {
