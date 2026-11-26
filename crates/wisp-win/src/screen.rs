@@ -87,3 +87,15 @@ pub fn caret_pos() -> Option<Point> {
         Some(Point { x: p.x, y: p.y })
     }
 }
+
+/// Size of a small icon (tray, title bar) in pixels at the current display
+/// scale: 16 at 100%, 24 at 150%, 32 at 200%.
+pub fn small_icon_size() -> u32 {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSMICON};
+    let s = unsafe { GetSystemMetrics(SM_CXSMICON) };
+    if s > 0 {
+        s as u32
+    } else {
+        16
+    }
+}

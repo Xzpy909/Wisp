@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/wisp.svg" width="128" alt="Wisp logo"></p>
+
 # Wisp
 
 A light, keyboard-first clipboard manager for Windows. Wisp sits in the tray,
