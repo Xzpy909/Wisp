@@ -108,11 +108,12 @@ them from the run's artifacts. To build the installer locally, install
 ### Releasing
 
 1. Set `version` in the root `Cargo.toml` (for example `0.2.0`) and commit.
-2. Tag and push: `git tag v0.2.0` then `git push origin v0.2.0`.
+2. On GitHub, open **Releases → Draft a new release**, type the tag `v0.2.0`,
+   pick **Create new tag on publish**, and click **Publish release**.
+   (Or push the tag: `git tag v0.2.0` then `git push origin v0.2.0`.)
 
 The Release workflow checks that the tag matches the version, runs the tests,
-builds the installer and the portable zip, and publishes a GitHub release with
-generated notes.
+builds the installer and the portable zip, and attaches them to the release.
 
 ### Memory
 
