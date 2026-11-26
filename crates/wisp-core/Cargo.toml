@@ -1,0 +1,9 @@
+[package]
+name = "wisp-core"
+description = "Platform-neutral logic for Wisp: settings and popup placement"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true

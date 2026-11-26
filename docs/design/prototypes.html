@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Wisp popup concepts</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* VOICE everyday product work: a design review of four shipped-looking Windows popups
+   IDEA a design studio's crit wall: four live screens pinned side by side on the same desktop
+   PICTURE the four interactive popups themselves, each on an identical wallpaper and taskbar
+   COLOUR white or near-black page, Fluent acrylic surfaces, one electric blue accent for selection
+   TYPE Segoe UI Variable (falls back to Inter) + JetBrains Mono for code clips
+   LAYOUT modest title, 2x2 wall of screens with notes under each, comparison table last; one column under 1000px */
+:root{color-scheme:light dark;--bg:light-dark(#ffffff,#121214);--ink:light-dark(#141416,#ececf0);--mut:light-dark(#5d5f66,#a2a4ad);--line:light-dark(#e4e4e8,#2a2a30);--acc:#2f6bff;--acc2:light-dark(#e8efff,#1c2a52);--panel:light-dark(rgba(249,249,251,.88),rgba(36,36,40,.86));--panel2:light-dark(rgba(255,255,255,.7),rgba(255,255,255,.05));--pline:light-dark(rgba(0,0,0,.09),rgba(255,255,255,.1));--sel:light-dark(rgba(47,107,255,.12),rgba(80,130,255,.22));--mark:light-dark(#ffe27a,#7a5c00);--code:light-dark(#f2f3f7,#1b1b20)}
+:root[data-theme=light]{color-scheme:light}:root[data-theme=dark]{color-scheme:dark}
+*{box-sizing:border-box;min-width:0}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:16px/1.55 "Segoe UI Variable Text","Segoe UI",Inter,system-ui,sans-serif;overflow-x:clip}
+.band{padding:clamp(24px,3.5vw,52px) max(4vw,16px)}
+.wrap{max-width:1320px;margin:0 auto}
+h1{font:700 clamp(32px,4.4vw,48px)/1.05 "Segoe UI Variable Display","Segoe UI",Inter,sans-serif;letter-spacing:-.02em;margin:0 0 10px;text-wrap:balance}
+.lede{color:var(--mut);max-width:68ch;margin:0}
+.lede b{color:var(--ink);font-weight:600}
+kbd{font:500 12.5px/1 "Segoe UI",Inter,sans-serif;padding:3px 6px;border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;background:light-dark(#fafafa,#1d1d22);color:var(--ink);white-space:nowrap}
+.wall{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:36px 28px;margin-top:28px}
+@media(max-width:1000px){.wall{grid-template-columns:minmax(0,1fr)}}
+.card h2{font:700 24px/1.1 "Segoe UI Variable Display","Segoe UI",Inter,sans-serif;letter-spacing:-.01em;margin:16px 0 4px;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+.card h2 span{font-weight:400;font-size:15px;color:var(--mut);letter-spacing:0}
+.card ul{margin:8px 0 0;padding-left:18px}
+.card li{margin:3px 0}
+.trade{color:var(--mut);margin:8px 0 0;font-size:15px}
+.keys{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:10px;font-size:14px;color:var(--mut)}
+.frame{position:relative;border-radius:12px;overflow:hidden;outline:2px solid transparent;outline-offset:3px;transition:outline-color .15s;cursor:text}
+.frame.on{outline-color:var(--acc)}
+.scr{position:absolute;left:0;top:0;width:680px;height:480px;transform-origin:0 0;overflow:hidden;font:13px/1.4 "Segoe UI Variable Text","Segoe UI",Inter,sans-serif;color:var(--ink)}
+.wall-bg{position:absolute;inset:0;background:radial-gradient(120% 90% at 18% 110%,light-dark(#9ec1ff,#16306e) 0%,transparent 60%),radial-gradient(90% 80% at 95% 0%,light-dark(#ffd2c2,#4b2340) 0%,transparent 60%),light-dark(#dfe6f3,#141a2b)}
+.wall-bg svg{position:absolute;inset:0;width:100%;height:100%}
+.bar{position:absolute;left:0;right:0;bottom:0;height:40px;background:light-dark(rgba(238,240,246,.86),rgba(28,28,32,.88));backdrop-filter:blur(20px);border-top:1px solid var(--pline);display:flex;align-items:center;justify-content:center;gap:6px}
+.bar i{width:26px;height:26px;border-radius:6px;display:block;background:light-dark(rgba(0,0,0,.08),rgba(255,255,255,.1))}
+.bar i:first-child{background:linear-gradient(135deg,#3a8bff,#1d4fd8)}
+.tray{position:absolute;right:10px;top:0;bottom:0;display:flex;align-items:center;gap:10px;font-size:11.5px;color:var(--mut)}
+.tray .wi{width:22px;height:22px;border-radius:5px;display:grid;place-items:center}
+.tray .wi.hot{background:var(--sel);outline:1px solid color-mix(in srgb,var(--acc) 50%,transparent)}
+.pop{position:absolute;background:var(--panel);backdrop-filter:blur(28px) saturate(1.4);border:1px solid var(--pline);border-radius:10px;box-shadow:0 18px 48px rgba(0,10,40,.28),0 2px 6px rgba(0,0,0,.12);display:flex;flex-direction:column;overflow:hidden}
+.srch{display:flex;align-items:center;gap:8px;padding:0 12px;height:42px;border-bottom:1px solid var(--pline)}
+.srch input{flex:1;border:0;background:none;outline:0;font:inherit;font-size:14px;color:var(--ink);height:100%}
+.srch input::placeholder{color:var(--mut)}
+.scope{font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:99px;background:var(--acc);color:#fff;white-space:nowrap}
+.cnt{font-size:11.5px;color:var(--mut);white-space:nowrap}
+.ic{width:16px;height:16px;flex:none;fill:none;stroke:currentColor;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round}
+.tico{width:28px;height:28px;border-radius:6px;display:grid;place-items:center;flex:none;background:var(--panel2);border:1px solid var(--pline);color:var(--mut);overflow:hidden}
+.list{overflow:auto;flex:1;padding:4px;scrollbar-width:thin}
+.row{display:flex;align-items:center;gap:10px;padding:6px 8px;border-radius:6px;position:relative}
+.row.s{background:var(--sel)}
+.row.s::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:3px;border-radius:3px;background:var(--acc)}
+.tx{flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.meta{font-size:11.5px;color:var(--mut);white-space:nowrap}
+.pin{color:var(--acc);font-size:11px}
+mark{background:var(--mark);color:inherit;border-radius:2px;padding:0 1px}
+.mono{font-family:"JetBrains Mono",Consolas,monospace;font-size:12px}
+.hints{display:flex;gap:12px;align-items:center;padding:0 12px;height:32px;border-top:1px solid var(--pline);font-size:11.5px;color:var(--mut);white-space:nowrap;overflow:hidden;flex:none}
+.hints kbd{font-size:10.5px;padding:2px 5px;border-bottom-width:1px}
+.grp{font-size:11px;font-weight:600;color:var(--mut);padding:8px 8px 3px}
+.empty{padding:30px 16px;text-align:center;color:var(--mut)}
+.toast{position:absolute;left:50%;bottom:54px;transform:translate(-50%,10px);background:light-dark(#1f1f23,#f2f2f5);color:light-dark(#fff,#111);padding:7px 14px;border-radius:8px;font-size:12.5px;opacity:0;transition:.2s;pointer-events:none;white-space:nowrap;z-index:5}
+.toast.v{opacity:1;transform:translate(-50%,0)}
+.inl{margin:2px 8px 6px 46px;padding:8px 10px;border-radius:6px;background:var(--panel2);border:1px solid var(--pline);color:var(--mut);font-size:12px;white-space:pre-wrap;max-height:84px;overflow:hidden}
+.inl svg.th{width:150px;height:84px;border-radius:4px;display:block}
+.tabs{display:flex;gap:2px;padding:6px 8px 0;flex:none}
+.tabs b{font-weight:500;font-size:12px;padding:5px 10px;border-radius:6px;color:var(--mut);cursor:pointer}
+.tabs b.on{background:var(--sel);color:var(--ink);font-weight:600}
+.split{display:grid;grid-template-columns:250px minmax(0,1fr);flex:1;min-height:0}
+.split .list{border-right:1px solid var(--pline)}
+.pv{padding:14px 16px;overflow:auto;display:flex;flex-direction:column;gap:10px}
+.pv .body{background:var(--panel2);border:1px solid var(--pline);border-radius:8px;padding:12px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;min-height:90px}
+.pv dl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:3px 14px;margin:0;font-size:12px}
+.pv dt{color:var(--mut)}.pv dd{margin:0;overflow-wrap:anywhere}
+.acts{display:flex;gap:6px;flex-wrap:wrap;margin-top:auto}
+.acts span{font-size:11.5px;padding:5px 9px;border-radius:6px;border:1px solid var(--pline);background:var(--panel2)}
+.acts span:first-child{background:var(--acc);color:#fff;border-color:transparent}
+.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;padding:8px;overflow:auto;flex:1;align-content:start}
+.cd{border:1px solid var(--pline);border-radius:8px;background:var(--panel2);overflow:hidden;display:flex;flex-direction:column;height:122px;position:relative}
+.cd.s{outline:2px solid var(--acc);outline-offset:-1px;background:var(--sel)}
+.cd .vis{height:72px;flex:none;overflow:hidden;display:flex;align-items:stretch}
+.cd .vis>*{flex:1}
+.cd .cap{padding:5px 8px;display:flex;gap:6px;align-items:center;font-size:11.5px;border-top:1px solid var(--pline)}
+.cd .num{flex:none;font-size:10.5px;font-weight:700;width:18px;height:18px;border-radius:5px;display:grid;place-items:center;background:rgba(0,0,0,.55);color:#fff}
+.vt{padding:7px 9px;font-size:11.5px;line-height:1.35;overflow:hidden;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;white-space:normal}
+.vc{background:var(--code);padding:7px 9px;font-family:"JetBrains Mono",Consolas,monospace;font-size:10.5px;line-height:1.45;white-space:pre-wrap;overflow:hidden}
+.vf{display:flex;align-items:center;justify-content:center;gap:8px;color:var(--mut);font-size:11px;padding:6px}
+.dr .row{align-items:flex-start}
+.dr .tx2{flex:1;overflow:hidden}
+.dr .l1{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.dr .l2{font-size:11px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dr .head{display:flex;align-items:center;gap:8px;padding:10px 12px 4px;font-weight:600}
+.dr .head small{margin-left:auto;font-weight:400;color:var(--mut);font-size:11px}
+.note{font-size:13px;color:var(--mut);margin-top:6px}
+table{border-collapse:collapse;width:100%;font-size:14.5px}
+th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-weight:600}
+thead th{border-bottom:2px solid var(--ink)}
+tbody th{color:var(--mut);font-weight:500;white-space:nowrap}
+.scroll{overflow-x:auto}
+.pick{margin-top:18px;padding:16px 18px;border-radius:10px;background:var(--acc2);max-width:900px}
+@media(max-width:600px){table{font-size:13px}th,td{padding:7px 6px}}
+@media(prefers-reduced-motion:reduce){.toast,.frame{transition:none}}
+</style>
+</head>
+<body>
+<section class="band"><div class="wrap">
+<h1>Wisp: four ways to find a clip in under a second</h1>
+<p class="lede">Each screen below is a live mockup of the popup you'd get from <kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>V</kbd>. <b>Click one and just start typing.</b> Arrows move, <kbd>Enter</kbd> pastes, <kbd>Tab</kbd> switches the type filter, <kbd>Ctrl</kbd> <kbd>P</kbd> pins, <kbd>Esc</kbd> clears. The clips are sample content, the same set in all four.</p>
+<div class="wall" id="wall"></div>
+</div></section>
+
+<section class="band" style="padding-top:0"><div class="wrap">
+<h2 style="font:700 28px/1.1 'Segoe UI Variable Display','Segoe UI',Inter,sans-serif;margin:0 0 14px">How they compare</h2>
+<div class="scroll"><table>
+<thead><tr><th></th><th>Beam</th><th>Ledger</th><th>Deck</th><th>Drawer</th></tr></thead>
+<tbody>
+<tr><th>Concept</th><td>Command bar</td><td>List + preview pane</td><td>Card grid</td><td>Tray-anchored panel</td></tr>
+<tr><th>Paste the newest clip</th><td>Shortcut, Enter</td><td>Shortcut, Enter</td><td>Shortcut, Alt+1</td><td>Shortcut, Enter</td></tr>
+<tr><th>Preview before pasting</th><td>Inline, selected row</td><td>Full, with metadata</td><td>Thumbnail per card</td><td>Two-line summary</td></tr>
+<tr><th>Clips visible at once</th><td>7</td><td>9 + 1 open</td><td>9</td><td>11</td></tr>
+<tr><th>Best for</th><td>Text-heavy, speed</td><td>Long text, code, files</td><td>Images, colours, design</td><td>Keeping it open while working</td></tr>
+<tr><th>Screen it covers</th><td>Small, centred</td><td>Medium, centred</td><td>Medium, centred</td><td>Narrow strip at right edge</td></tr>
+</tbody></table></div>
+<div class="pick"><b>My suggestion:</b> build Ledger as the main window and give it Beam's behaviour (opens with the cursor in the search box, results shrink to fit when there are few). Deck's <kbd>Alt</kbd>+number quick paste and Drawer's pinned group are easy features to borrow in any of them.</div>
+</div></section>
+
+<script>
+{
+const IC={text:'<path d="M3 4h10M3 8h10M3 12h6"/>',file:'<path d="M4 2h5l3 3v9H4zM9 2v3h3"/>',files:'<path d="M6 4h4l2 2v8H6zM4 2h4M4 2v10"/>',image:'<path d="M2 3h12v10H2zM2 11l4-4 3 3 2-2 3 3"/><circle cx="11" cy="6" r="1"/>',code:'<path d="M6 4L2 8l4 4M10 4l4 4-4 4"/>',url:'<path d="M7 9a3 3 0 0 0 4 0l2-2a3 3 0 0 0-4-4l-1 1M9 7a3 3 0 0 0-4 0L3 9a3 3 0 0 0 4 4l1-1"/>',color:'<path d="M8 2C5 6 4 8 4 10a4 4 0 0 0 8 0c0-2-1-4-4-8z"/>',secret:'<path d="M4 7h8v7H4zM6 7V5a2 2 0 0 1 4 0v2"/>',folder:'<path d="M2 4h4l2 2h6v7H2z"/>',search:'<circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/>',pin:'<path d="M6 2h4l-1 4 3 3H4l3-3zM8 9v5"/>'};
+const ico=(k,c)=>`<svg class="ic" viewBox="0 0 16 16"${c?` style="color:${c}"`:''}>${IC[k]}</svg>`;
+const SHOT='<svg class="th" viewBox="0 0 160 90" preserveAspectRatio="xMidYMid slice"><rect width="160" height="90" fill="#e9edf5"/><rect x="0" y="0" width="160" height="12" fill="#cfd8e8"/><rect x="0" y="12" width="36" height="78" fill="#dde4f0"/><rect x="44" y="20" width="70" height="7" rx="2" fill="#2f6bff"/><rect x="44" y="33" width="100" height="4" rx="2" fill="#9aa6bb"/><rect x="44" y="41" width="88" height="4" rx="2" fill="#9aa6bb"/><rect x="44" y="54" width="48" height="26" rx="3" fill="#fff"/><rect x="98" y="54" width="48" height="26" rx="3" fill="#fff"/><path d="M50 74l10-10 7 6 6-5 13 9z" fill="#7fb38f"/></svg>';
+const MOOD='<svg class="th" viewBox="0 0 160 90" preserveAspectRatio="xMidYMid slice"><defs><linearGradient id="mg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffb38a"/><stop offset="1" stop-color="#ff6f61"/></linearGradient></defs><rect width="160" height="90" fill="url(#mg)"/><circle cx="118" cy="34" r="16" fill="#ffe7a8"/><path d="M0 70q40-30 80-6t80-8v34H0z" fill="#5a3a6e"/><path d="M0 80q50-18 100-2t60-4v16H0z" fill="#2c2142"/></svg>';
+const CLIPS=[
+{t:'text',v:'Hi Mirelle, attaching the revised invoice for November. Let me know if the totals look right before Friday.',app:'Outlook',ago:'2 min',g:'Today'},
+{t:'file',name:'Invoice_2026-11_Studio.pdf',path:'D:\\Work\\Invoices',size:'184 KB',app:'File Explorer',ago:'4 min',g:'Today'},
+{t:'image',name:'Screenshot 2026-11-25 231402.png',dims:'1280 × 720',size:'212 KB',th:SHOT,app:'Snipping Tool',ago:'11 min',g:'Today'},
+{t:'code',v:'git rebase -i HEAD~3',app:'Windows Terminal',ago:'18 min',g:'Today',pin:1},
+{t:'url',v:'https://learn.microsoft.com/windows/win32/dataxchg/clipboard',app:'Edge',ago:'26 min',g:'Today'},
+{t:'color',v:'#2F6BFF',app:'Figma',ago:'41 min',g:'Today'},
+{t:'secret',v:'sk_test_••••••••••••3f9a',app:'1Password',ago:'48 min',g:'Today',note:'Clears in 0:52'},
+{t:'files',name:'3 files',list:['logo-dark.svg','logo-light.svg','favicon.ico'],path:'D:\\Brand\\Export',size:'61 KB',app:'File Explorer',ago:'1 h',g:'Today'},
+{t:'code',v:"SELECT id, client, total\nFROM invoices\nWHERE status = 'open'\nORDER BY due_date;",app:'VS Code',ago:'3 h',g:'Today'},
+{t:'text',v:'14 Starfall Lane, Suite 400, Moonforge 98101',app:'Maps',ago:'5 h',g:'Today',pin:1},
+{t:'image',name:'moodboard-crop.jpg',dims:'800 × 600',size:'96 KB',th:MOOD,app:'Chrome',ago:'Yesterday',g:'Yesterday'},
+{t:'text',v:'+1 206 555 0143',app:'Teams',ago:'Yesterday',g:'Yesterday'},
+{t:'folder',name:'Q4 Reports',path:'D:\\Work',app:'File Explorer',ago:'Yesterday',g:'Yesterday'},
+{t:'text',v:'Meeting moved to Thursday 10:30, same room. Bring the printed invoice drafts.',app:'Slack',ago:'Mon',g:'Earlier'},
+{t:'url',v:'https://github.com/microsoft/PowerToys',app:'Chrome',ago:'Mon',g:'Earlier'},
+{t:'text',v:'Thanks so much! Talk soon.',app:'WhatsApp',ago:'Sun',g:'Earlier'}];
+const SCOPES=[['All',null],['Text',['text','secret']],['Files',['file','files','folder']],['Images',['image']],['Links',['url']],['Code',['code','color']]];
+const TCOL={text:'#6b7280',file:'#d9480f',files:'#d9480f',folder:'#e0a100',image:'#7048e8',code:'#0b7285',url:'#2f6bff',color:'#2f6bff',secret:'#c2255c'};
+const TNAME={text:'Text',file:'File',files:'Files',folder:'Folder',image:'Image',code:'Code',url:'Link',color:'Colour',secret:'Secret'};
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const lab=c=>c.v||c.name;
+const hl=(s,q)=>{s=String(s);if(!q)return esc(s);const L=s.toLowerCase(),Q=q.toLowerCase();let o='',i=0,j;while((j=L.indexOf(Q,i))>-1){o+=esc(s.slice(i,j))+'<mark>'+esc(s.slice(j,j+Q.length))+'</mark>';i=j+Q.length}return o+esc(s.slice(i))};
+const hay=c=>[c.v,c.name,(c.list||[]).join(' '),c.app,TNAME[c.t],c.path].join(' ').toLowerCase();
+const tile=(c,big)=>c.t==='color'?`<span class="tico" style="background:${c.v}"></span>`:c.t==='image'?`<span class="tico">${c.th.replace('class="th"','width="28" height="28"')}</span>`:`<span class="tico">${ico(c.t,TCOL[c.t])}</span>`;
+const pinB=c=>c.pin?`<span class="pin" title="Pinned">${ico('pin','var(--acc)')}</span>`:'';
+const bar=(hot)=>`<div class="bar"><i></i><i></i><i></i><i></i><i></i><div class="tray"><span class="wi${hot?' hot':''}" title="Wisp">${ico('color','var(--acc)')}</span><span>ENG</span><span>09:41</span></div></div>`;
+const WALL=`<div class="wall-bg"><svg viewBox="0 0 680 480" preserveAspectRatio="none"><path d="M0 330C160 250 300 400 460 300S640 220 680 240V480H0z" fill="light-dark(rgba(255,255,255,.25),rgba(255,255,255,.04))" style="fill:color-mix(in srgb,white 22%,transparent)"/><path d="M0 390C200 330 330 440 520 360S660 330 680 340V480H0z" style="fill:color-mix(in srgb,white 14%,transparent)"/></svg></div>`;
+const hints=a=>`<div class="hints">${a.map(([k,t])=>`<span>${k.split('+').map(x=>`<kbd>${x}</kbd>`).join('')} ${t}</span>`).join('')}</div>`;
+
+/* per-design renderers */
+const D=[
+{id:'beam',name:'Beam',sub:'Spotlight-style command bar',q:'inv',scope:0,cols:1,
+ pts:['Nothing on screen but the search box, so it feels instant and never gets in the way.','Results shrink to fit the query; the selected row expands in place to show more.','Familiar from Windows PowerToys Run and launcher apps, so there is almost nothing to learn.'],
+ trade:'Weak for browsing without a query, and image clips get only a small preview.',
+ keys:[['Enter','paste'],['Shift+Enter','paste as plain text'],['Tab','cycle filter'],['Ctrl+P','pin'],['Esc','clear, then close']],
+ html(s,r){const sc=SCOPES[s.scope][0];return `${WALL}<div class="pop" style="left:50px;top:56px;width:580px;max-height:368px">
+ <div class="srch" style="height:52px">${ico('search')}${s.scope?`<span class="scope">${sc}</span>`:''}<input data-i placeholder="Search clipboard history" style="font-size:18px" value="${esc(s.q)}"><span class="cnt">${r.length} of ${s.clips.length}</span></div>
+ <div class="list" data-l>${r.length?r.map((c,i)=>`<div class="row${i===s.sel?' s':''}" data-n="${i}">${tile(c)}<span class="tx">${hl(lab(c).split('\n')[0],s.q)}</span>${pinB(c)}<span class="meta">${esc(c.app)} · ${esc(c.ago)}</span></div>${i===s.sel?this.inl(c,s.q):''}`).join(''):`<div class="empty">No clips match “${esc(s.q)}”</div>`}</div>
+ ${hints([['Enter','Paste'],['Shift+Enter','Plain text'],['Tab','Filter'],['Ctrl+P','Pin'],['Esc','Close']])}</div>${bar()}`},
+ inl(c,q){if(c.t==='image')return `<div class="inl">${c.th}</div>`;if(c.t==='color')return `<div class="inl" style="display:flex;gap:10px;align-items:center"><span style="width:44px;height:26px;border-radius:4px;background:${c.v}"></span>rgb(47, 107, 255) · hsl(223, 100%, 59%)</div>`;if(c.t==='file'||c.t==='folder')return `<div class="inl">${esc(c.path)}\\${esc(c.name)}${c.size?' · '+esc(c.size):''}</div>`;if(c.t==='files')return `<div class="inl">${c.list.map(esc).join('\n')}</div>`;return `<div class="inl${c.t==='code'?' mono':''}">${hl(c.v,q)}</div>`}},
+{id:'ledger',name:'Ledger',sub:'Compact list with preview pane',q:'',scope:0,cols:1,sel:1,
+ pts:['You see the whole clip, its source app, size and path before you paste, so no wrong pastes.','Groups (Pinned, Today, Yesterday) keep browsing easy when you can\'t remember a word to search for.','Room for actions like paste as plain text, open file location, or copy path.'],
+ trade:'The biggest window of the four; slightly slower to scan than a single list.',
+ keys:[['Enter','paste'],['Ctrl+Enter','paste and keep open'],['Ctrl+O','open file location'],['Ctrl+P','pin'],['Ctrl+Del','forget clip']],
+ html(s,r){const c=r[s.sel];let last='';return `${WALL}<div class="pop" style="left:30px;top:22px;width:620px;height:404px">
+ <div class="srch">${ico('search')}${s.scope?`<span class="scope">${SCOPES[s.scope][0]}</span>`:''}<input data-i placeholder="Type to search ${s.clips.length} clips" value="${esc(s.q)}"><span class="cnt">${r.length} clips</span></div>
+ <div class="split"><div class="list" data-l>${r.length?r.map((x,i)=>{const g=x.pin&&!s.q?'Pinned':x.g;const h=g!==last?`<div class="grp">${g}</div>`:'';last=g;return h+`<div class="row${i===s.sel?' s':''}" data-n="${i}">${tile(x)}<span class="tx">${hl(lab(x).split('\n')[0],s.q)}</span><span class="meta">${esc(x.ago)}</span></div>`}).join(''):`<div class="empty">Nothing found</div>`}</div>
+ <div class="pv">${c?this.pv(c,s.q):''}</div></div>
+ ${hints([['Enter','Paste'],['Shift+Enter','Plain text'],['Ctrl+O','Open location'],['Ctrl+P','Pin'],['Tab','Filter']])}</div>${bar()}`},
+ pv(c,q){let body;if(c.t==='image')body=`<div class="body" style="padding:0;overflow:hidden">${c.th.replace('class="th"','style="width:100%;height:150px;display:block"')}</div>`;else if(c.t==='color')body=`<div class="body" style="background:${c.v};min-height:110px"></div>`;else if(c.t==='file'||c.t==='folder')body=`<div class="body" style="display:flex;gap:12px;align-items:center"><span class="tico" style="width:46px;height:46px">${ico(c.t,TCOL[c.t])}</span><div><b>${hl(c.name,q)}</b><br><span style="color:var(--mut)">${esc(c.path)}</span></div></div>`;else if(c.t==='files')body=`<div class="body">${c.list.map(f=>ico('file',TCOL.file)+' '+hl(f,q)).join('\n')}</div>`;else body=`<div class="body${c.t==='code'?' mono':''}">${hl(c.v,q)}</div>`;
+ const rows=[['Type',TNAME[c.t]],['From',c.app],['Copied',/\d/.test(c.ago)?c.ago+' ago':c.ago],c.dims&&['Size',c.dims+' · '+c.size],c.size&&!c.dims&&['Size',c.size],c.v&&c.t!=='color'&&c.t!=='secret'&&['Length',c.v.length+' characters'],c.t==='color'&&['Also','rgb(47, 107, 255)'],c.note&&['Sensitive',c.note]].filter(Boolean);
+ return body+`<dl>${rows.map(([a,b])=>`<dt>${a}</dt><dd>${esc(b)}</dd>`).join('')}</dl><div class="acts"><span>Paste</span><span>Plain text</span>${c.path?'<span>Open location</span>':''}<span>${c.pin?'Unpin':'Pin'}</span></div>`}},
+{id:'deck',name:'Deck',sub:'Visual card grid',q:'',scope:0,cols:3,
+ pts:['Images, colours and files are recognisable at a glance, before you read a word.','Every visible card has a number: Alt+1 to Alt+9 pastes it without moving the selection.','Filter tabs along the top make it a lightweight visual library, not just a history.'],
+ trade:'Shows fewer clips per screen, and long text gets cut to a few lines.',
+ keys:[['Alt+1…9','paste card'],['Arrows','move in grid'],['Enter','paste'],['Tab','next tab'],['Ctrl+P','pin']],
+ html(s,r){return `${WALL}<div class="pop" style="left:30px;top:22px;width:620px;height:404px">
+ <div class="srch">${ico('search')}<input data-i placeholder="Search clips" value="${esc(s.q)}"><span class="cnt">${r.length} clips</span></div>
+ <div class="tabs">${SCOPES.map((x,i)=>`<b class="${i===s.scope?'on':''}" data-t="${i}">${x[0]}</b>`).join('')}</div>
+ <div class="grid" data-l>${r.length?r.map((c,i)=>`<div class="cd${i===s.sel?' s':''}" data-n="${i}"><div class="vis">${this.vis(c,s.q)}</div><div class="cap">${i<9?`<span class="num">${i+1}</span>`:''}${ico(c.t,TCOL[c.t])}<span class="tx">${esc(c.app)}</span>${pinB(c)}<span class="meta">${esc(c.ago)}</span></div></div>`).join(''):`<div class="empty" style="grid-column:1/-1">Nothing in ${SCOPES[s.scope][0]} matches</div>`}</div>
+ ${hints([['Alt+1','Quick paste'],['Arrows','Move'],['Enter','Paste'],['Tab','Next tab'],['Ctrl+P','Pin']])}</div>${bar()}`},
+ vis(c,q){if(c.t==='image')return c.th.replace('class="th"','preserveAspectRatio="xMidYMid slice" style="width:100%;height:72px;display:block"');if(c.t==='color')return `<div style="background:${c.v};color:#fff;font:600 13px/1 Inter,sans-serif;display:flex;align-items:flex-end;padding:8px">${esc(c.v)}</div>`;if(c.t==='code')return `<div class="vc">${hl(c.v,q)}</div>`;if(c.t==='file'||c.t==='folder'||c.t==='files')return `<div class="vf">${ico(c.t,TCOL[c.t])}<span>${hl(c.list?c.list.join(', '):c.name,q)}</span></div>`;return `<div class="vt">${hl(c.v,q)}</div>`}},
+{id:'drawer',name:'Drawer',sub:'Sidebar anchored to the tray',q:'',scope:0,cols:1,
+ pts:['Slides in from the tray where you expect system tools, and never covers the document you\'re pasting into.','Tall and narrow, so it shows the most clips at once, with pinned clips always on top.','Can be pinned open as a side panel and clips dragged straight into any app.'],
+ trade:'Your eyes travel to the screen edge; less natural on a big or second monitor.',
+ keys:[['Enter','paste'],['Tab','next tab'],['Ctrl+P','pin to top'],['Ctrl+D','dock open'],['Esc','slide away']],
+ html(s,r){const pins=r.filter(c=>c.pin),rest=r.filter(c=>!c.pin),ord=[...pins,...rest];s.ord=ord;let last='';return `${WALL}<div class="pop dr" style="right:10px;top:10px;bottom:50px;width:330px">
+ <div class="head">${ico('color','var(--acc)')} Wisp<small>${s.clips.length} clips · 30 days</small></div>
+ <div class="srch" style="margin:4px 10px 0;border:1px solid var(--pline);border-radius:6px;height:34px;background:var(--panel2)">${ico('search')}<input data-i placeholder="Type to search" value="${esc(s.q)}"></div>
+ <div class="tabs">${SCOPES.slice(0,4).map((x,i)=>`<b class="${i===s.scope?'on':''}" data-t="${i}">${x[0]}</b>`).join('')}</div>
+ <div class="list" data-l>${ord.length?ord.map((c,i)=>{const g=c.pin?'Pinned':c.g;const h=g!==last?`<div class="grp">${g}</div>`:'';last=g;return h+`<div class="row${i===s.sel?' s':''}" data-n="${i}">${tile(c)}<div class="tx2"><div class="l1${c.t==='code'?' mono':''}">${hl(lab(c).split('\n')[0],s.q)}</div><div class="l2">${esc(TNAME[c.t])} · ${esc(c.app)} · ${esc(c.ago)}</div></div></div>`}).join(''):`<div class="empty">No matches</div>`}</div>
+ ${hints([['Enter','Paste'],['Tab','Tab'],['Ctrl+P','Pin'],['Ctrl+D','Dock']])}</div>${bar(1)}`}}];
+D[3].scopes=4;
+
+const wall=document.getElementById('wall');
+wall.innerHTML=D.map(d=>`<article class="card"><div class="frame" id="f-${d.id}" tabindex="-1"><div class="scr"></div><div class="toast"></div></div>
+<h2>${d.name}<span>${d.sub}</span></h2><ul>${d.pts.map(p=>`<li>${esc(p)}</li>`).join('')}</ul><p class="trade">Trade-off: ${esc(d.trade)}</p>
+<div class="keys">${d.keys.map(([k,t])=>`<span>${k.split('+').map(x=>`<kbd>${x}</kbd>`).join(' ')} ${t}</span>`).join('')}</div></article>`).join('');
+
+const st=D.map(d=>({q:d.q,scope:d.scope,sel:d.sel||0,clips:CLIPS.map(c=>({...c}))}));
+const results=(i)=>{const s=st[i],sc=SCOPES[s.scope][1],q=s.q.trim().toLowerCase();let r=s.clips.filter(c=>(!sc||sc.includes(c.t))&&(!q||hay(c).includes(q)));if(i===1&&!q){r=[...r.filter(c=>c.pin),...r.filter(c=>!c.pin)]}if(i===3){r=[...r.filter(c=>c.pin),...r.filter(c=>!c.pin)]}return r};
+let active=-1;
+const render=(i,keepFocus)=>{const d=D[i],s=st[i],r=results(i);s.r=r;if(s.sel>=r.length)s.sel=Math.max(0,r.length-1);const scr=document.querySelector(`#f-${d.id} .scr`);const pos=keepFocus?scr.querySelector('[data-i]').selectionStart:null;const ls=scr.querySelector('[data-l]');const top=ls?ls.scrollTop:0;scr.innerHTML=d.html(s,r);const inp=scr.querySelector('[data-i]');const l=scr.querySelector('[data-l]');if(l){l.scrollTop=top;const el=l.querySelector('.s');if(el){const a=el.offsetTop,b=a+el.offsetHeight+(i===0?90:0);if(a<l.scrollTop)l.scrollTop=a-30;else if(b>l.scrollTop+l.clientHeight)l.scrollTop=b-l.clientHeight+4}}if(keepFocus){inp.focus({preventScroll:true});inp.setSelectionRange(pos,pos)}bind(i)};
+const toast=(i,msg)=>{const t=document.querySelector(`#f-${D[i].id} .toast`);t.textContent=msg;t.classList.add('v');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('v'),1500)};
+const paste=(i,c,plain)=>{if(!c)return;toast(i,`${plain?'Pasted as plain text':'Pasted'}: ${lab(c).split('\n')[0].slice(0,34)}${lab(c).length>34?'…':''}`)};
+const nScopes=i=>D[i].scopes||SCOPES.length;
+const bind=(i)=>{const f=document.getElementById('f-'+D[i].id),inp=f.querySelector('[data-i]');
+ inp.addEventListener('input',()=>{st[i].q=inp.value;st[i].sel=0;render(i,true)});
+ inp.addEventListener('focus',()=>{active=i;document.querySelectorAll('.frame').forEach((x,j)=>x.classList.toggle('on',j===i))});
+ inp.addEventListener('keydown',e=>key(i,e));
+ f.querySelectorAll('[data-n]').forEach(el=>{el.addEventListener('mousedown',e=>{e.preventDefault();st[i].sel=+el.dataset.n;render(i,true)});el.addEventListener('dblclick',()=>paste(i,st[i].r[+el.dataset.n]))});
+ f.querySelectorAll('[data-t]').forEach(el=>el.addEventListener('mousedown',e=>{e.preventDefault();st[i].scope=+el.dataset.t;st[i].sel=0;render(i,true)}))};
+const key=(i,e)=>{const s=st[i],r=i===3?s.ord:s.r,n=r.length,c=D[i].cols,k=e.key;let h=true;
+ if(k==='ArrowDown')s.sel=Math.min(n-1,s.sel+c);else if(k==='ArrowUp')s.sel=Math.max(0,s.sel-c);
+ else if(c>1&&k==='ArrowRight')s.sel=Math.min(n-1,s.sel+1);else if(c>1&&k==='ArrowLeft')s.sel=Math.max(0,s.sel-1);
+ else if(k==='Enter'){paste(i,r[s.sel],e.shiftKey);return e.preventDefault()}
+ else if(k==='Tab'){s.scope=(s.scope+(e.shiftKey?nScopes(i)-1:1))%nScopes(i);s.sel=0}
+ else if(k==='Escape'){if(s.q){s.q='';s.sel=0}else{toast(i,'Wisp hides; Ctrl+Shift+V brings it back');return}}
+ else if((e.ctrlKey||e.metaKey)&&k.toLowerCase()==='p'&&r[s.sel]){const x=r[s.sel];x.pin=!x.pin;toast(i,x.pin?'Pinned':'Unpinned')}
+ else if((e.ctrlKey||e.metaKey)&&k==='Delete'&&r[s.sel]){const x=r[s.sel];s.clips=s.clips.filter(y=>y!==x);toast(i,'Clip forgotten')}
+ else if((e.ctrlKey||e.metaKey)&&k.toLowerCase()==='o'&&r[s.sel]){toast(i,r[s.sel].path?'Opening '+r[s.sel].path:'No file location for this clip')}
+ else if((e.ctrlKey||e.metaKey)&&k.toLowerCase()==='d'&&i===3){toast(i,'Docked: Drawer stays open')}
+ else if(e.altKey&&/^[1-9]$/.test(k)){paste(i,r[+k-1])}
+ else h=false;
+ if(h){e.preventDefault();if(i===3){s.ord=null}render(i,true)}};
+
+const fit=()=>D.forEach(d=>{const f=document.getElementById('f-'+d.id),w=f.clientWidth,k=w/680;f.style.height=480*k+'px';f.querySelector('.scr').style.transform=`scale(${k})`});
+const ro=new ResizeObserver(fit);ro.observe(wall);
+D.forEach((d,i)=>{render(i);document.getElementById('f-'+d.id).addEventListener('mousedown',e=>{if(e.target.tagName!=='INPUT'&&!e.target.closest('[data-n],[data-t]')){e.preventDefault();e.currentTarget.querySelector('[data-i]').focus({preventScroll:true})}})});
+fit();
+}
+</script>
+</body>
+</html>
