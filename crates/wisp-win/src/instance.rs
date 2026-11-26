@@ -1,19 +1,23 @@
 //! One running copy of Wisp. A second launch signals the first to open the
-//! popup, then exits.
+//! popup, then exits. `wisp --quit` (used by the installer) asks it to close.
 
 use crate::wide;
 use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, HANDLE, WAIT_OBJECT_0};
 use windows_sys::Win32::System::Threading::{
-    CreateEventW, CreateMutexW, OpenEventW, SetEvent, WaitForSingleObject, EVENT_MODIFY_STATE, INFINITE,
+    CreateEventW, CreateMutexW, OpenEventW, OpenMutexW, SetEvent, WaitForSingleObject, EVENT_MODIFY_STATE, INFINITE,
 };
 
 const MUTEX_NAME: &str = "Local\\Wisp.SingleInstance";
 const EVENT_NAME: &str = "Local\\Wisp.ShowPopup";
+const QUIT_EVENT_NAME: &str = "Local\\Wisp.Quit";
+/// `SYNCHRONIZE` access right.
+const SYNCHRONIZE: u32 = 0x0010_0000;
 
 /// Held by the primary instance for its whole lifetime.
 pub struct SingleInstance {
     mutex: usize,
     event: usize,
+    quit_event: usize,
 }
 
 pub enum Instance {
@@ -51,11 +55,37 @@ fn try_primary() -> Option<SingleInstance> {
     let ev = wide(EVENT_NAME);
     // Auto-reset event, initially unsignalled.
     let event = unsafe { CreateEventW(std::ptr::null(), 0, 0, ev.as_ptr()) };
-    Some(SingleInstance { mutex: mutex as usize, event: event as usize })
+    let qev = wide(QUIT_EVENT_NAME);
+    let quit_event = unsafe { CreateEventW(std::ptr::null(), 0, 0, qev.as_ptr()) };
+    Some(SingleInstance { mutex: mutex as usize, event: event as usize, quit_event: quit_event as usize })
 }
 
 fn signal_primary() {
-    let ev = wide(EVENT_NAME);
+    signal(EVENT_NAME);
+}
+
+/// Ask a running Wisp to quit and wait up to `timeout` for it to exit.
+/// Returns true when no Wisp is running any more.
+pub fn request_quit(timeout: std::time::Duration) -> bool {
+    signal(QUIT_EVENT_NAME);
+    let name = wide(MUTEX_NAME);
+    let start = std::time::Instant::now();
+    loop {
+        // SAFETY: valid null-terminated name.
+        let h = unsafe { OpenMutexW(SYNCHRONIZE, 0, name.as_ptr()) };
+        if h.is_null() {
+            return true;
+        }
+        unsafe { CloseHandle(h) };
+        if start.elapsed() >= timeout {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
+fn signal(event_name: &str) {
+    let ev = wide(event_name);
     unsafe {
         let h = OpenEventW(EVENT_MODIFY_STATE, 0, ev.as_ptr());
         if !h.is_null() {
@@ -68,27 +98,35 @@ fn signal_primary() {
 impl SingleInstance {
     /// Call `f` on a background thread each time another launch signals us.
     pub fn on_activate(&self, f: impl Fn() + Send + 'static) {
-        let event = self.event;
-        if event == 0 {
-            return;
-        }
-        std::thread::Builder::new()
-            .name("wisp-activate".into())
-            .spawn(move || loop {
-                // SAFETY: the handle lives as long as the process (see Drop note).
-                let r = unsafe { WaitForSingleObject(event as HANDLE, INFINITE) };
-                if r != WAIT_OBJECT_0 {
-                    break;
-                }
-                f();
-            })
-            .ok();
+        wait_loop(self.event, "wisp-activate", f);
     }
+
+    /// Call `f` on a background thread when `wisp --quit` asks us to close.
+    pub fn on_quit_request(&self, f: impl Fn() + Send + 'static) {
+        wait_loop(self.quit_event, "wisp-quit", f);
+    }
+}
+
+fn wait_loop(event: usize, name: &str, f: impl Fn() + Send + 'static) {
+    if event == 0 {
+        return;
+    }
+    std::thread::Builder::new()
+        .name(name.into())
+        .spawn(move || loop {
+            // SAFETY: the handle lives as long as the process (see Drop note).
+            let r = unsafe { WaitForSingleObject(event as HANDLE, INFINITE) };
+            if r != WAIT_OBJECT_0 {
+                break;
+            }
+            f();
+        })
+        .ok();
 }
 
 impl Drop for SingleInstance {
     fn drop(&mut self) {
-        // The event handle stays open for the waiting thread; the OS closes it
+        // The event handles stay open for the waiting thread; the OS closes it
         // at process exit. Releasing the mutex is what matters for relaunch.
         unsafe { CloseHandle(self.mutex as HANDLE) };
     }

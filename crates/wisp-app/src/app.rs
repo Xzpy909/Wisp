@@ -20,9 +20,10 @@ use tray_icon::menu::MenuEvent;
 use tray_icon::{MouseButton, MouseButtonState, TrayIconEvent};
 use wisp_core::clip::{combine, now_secs, relative_time};
 use wisp_core::backup::{self, BackupInfo};
+use wisp_core::update::{self, Release};
 use wisp_core::{images, popup_rect, Clip, ClipContent, Filter, Kind, PopupStyle, Settings, Store};
 use wisp_win::clipboard::{self, CaptureOptions};
-use wisp_win::{autostart, instance, paste, screen, window, Hwnd};
+use wisp_win::{autostart, http, instance, paste, screen, window, Hwnd};
 
 /// Most clips the popup lists at once.
 const LIST_LIMIT: usize = 200;
@@ -70,6 +71,9 @@ struct App {
     capture: Arc<CaptureOptions>,
     retention: Arc<Retention>,
     thumbs: HashMap<i64, Image>,
+    /// A newer release, once the update check has found one.
+    update: Option<Release>,
+    update_timer: Timer,
     /// Clips in a multiple selection, and the row Shift+click extends from.
     marked: Vec<i64>,
     anchor: usize,
@@ -211,6 +215,13 @@ impl App {
                 self.save();
                 self.restart();
             }
+            Some(Action::ToggleUpdateCheck) => {
+                self.settings.check_for_updates = !self.settings.check_for_updates;
+                self.save();
+                self.settings_to_ui();
+                self.check_for_updates();
+            }
+            Some(Action::GetUpdate) => self.get_update(),
             Some(Action::TogglePause) => {
                 let paused = !self.capture.paused.load(Ordering::Relaxed);
                 self.capture.paused.store(paused, Ordering::Relaxed);
@@ -585,6 +596,7 @@ impl App {
         p.set_style_index(PopupStyle::ALL.iter().position(|x| *x == s.popup_style).unwrap_or(0) as i32);
         p.set_glass(s.glass_effect);
         p.set_autostart(s.start_with_windows);
+        p.set_check_updates(s.check_for_updates);
         p.set_capture_images(s.capture_images);
         p.set_capture_files(s.capture_files);
         p.set_keep_days(s.keep_days as i32);
@@ -599,11 +611,15 @@ impl App {
         let s = &mut self.settings;
         s.popup_style = PopupStyle::ALL.get(p.get_style_index() as usize).copied().unwrap_or_default();
         s.start_with_windows = p.get_autostart();
+        s.check_for_updates = p.get_check_updates();
         s.capture_images = p.get_capture_images();
         s.capture_files = p.get_capture_files();
         s.keep_days = p.get_keep_days().max(0) as u32;
         s.max_clips = p.get_max_clips().max(0) as u32;
         self.apply_capture_settings();
+        if self.settings.check_for_updates && !before.check_for_updates {
+            self.check_for_updates();
+        }
         if before.start_with_windows != self.settings.start_with_windows {
             apply_autostart(&self.settings);
         }
@@ -670,6 +686,35 @@ impl App {
         }
         self.thumbs.clear();
         self.refresh();
+    }
+
+    /// Ask GitHub for the latest release on a background thread (if enabled).
+    fn check_for_updates(&self) {
+        if !self.settings.check_for_updates {
+            return;
+        }
+        std::thread::Builder::new()
+            .name("wisp-update-check".into())
+            .spawn(|| {
+                if let Some(release) = latest_release() {
+                    if update::is_newer(&release.version, env!("CARGO_PKG_VERSION")) {
+                        on_ui(move |app| app.update_found(release));
+                    }
+                }
+            })
+            .ok();
+    }
+
+    fn update_found(&mut self, release: Release) {
+        self.tray.show_update(&release.version);
+        self.popup.set_update_version(release.version.clone().into());
+        self.update = Some(release);
+    }
+
+    /// Open the release page, where the new installer is.
+    fn get_update(&self) {
+        let url = self.update.as_ref().map_or(update::RELEASES_PAGE, |r| r.url.as_str());
+        http::open_in_browser(url);
     }
 
     fn quit(&mut self) {
@@ -789,6 +834,17 @@ fn parse_hex_color(text: &str) -> Option<slint::Color> {
     Some(slint::Color::from_argb_u8(a, r, g, b))
 }
 
+/// The latest published release, or None when offline or there is none yet.
+fn latest_release() -> Option<Release> {
+    let agent = concat!("Wisp/", env!("CARGO_PKG_VERSION"));
+    let headers = "Accept: application/vnd.github+json\r\nX-GitHub-Api-Version: 2022-11-28";
+    let (status, body) = http::get(update::API_HOST, update::LATEST_RELEASE_PATH, agent, headers).ok()?;
+    if status != 200 {
+        return None;
+    }
+    update::parse_latest(&String::from_utf8_lossy(&body))
+}
+
 fn apply_autostart(settings: &Settings) {
     let result = if settings.start_with_windows {
         autostart::command_for_current_exe().and_then(|cmd| {
@@ -872,6 +928,11 @@ fn start_capture(options: Arc<CaptureOptions>, retention: Arc<Retention>, data_d
 pub fn run() {
     let args: Vec<String> = std::env::args().collect();
     let has = |flag: &str| args.iter().any(|a| a == flag);
+    if has("--quit") {
+        // Used by the installer and uninstaller: close a running Wisp and wait for it.
+        let gone = instance::request_quit(Duration::from_secs(10));
+        std::process::exit(if gone { 0 } else { 1 });
+    }
     let single = match instance::acquire(has("--restart")) {
         instance::Instance::Primary(s) => s,
         instance::Instance::Secondary => return,
@@ -937,6 +998,7 @@ pub fn run() {
     popup.on_toggle_pin(|id| with_app(|app| app.toggle_pin(id as i64)));
     popup.on_forget(|id| with_app(|app| app.forget(id as i64)));
     popup.on_reveal(|id| with_app(|app| app.reveal(id as i64)));
+    popup.on_get_update(|| with_app(|app| app.get_update()));
     popup.on_open_data_folder(|| {
         let _ = std::process::Command::new("explorer").arg(Settings::dir()).spawn();
     });
@@ -961,6 +1023,7 @@ pub fn run() {
     })));
 
     single.on_activate(|| on_ui(|app| app.show()));
+    single.on_quit_request(|| on_ui(|app| app.quit()));
 
     APP.with(|cell| {
         *cell.borrow_mut() = Some(App {
@@ -977,11 +1040,20 @@ pub fn run() {
             capture,
             retention,
             thumbs: HashMap::new(),
+            update: None,
+            update_timer: Timer::default(),
             marked: Vec::new(),
             anchor: 0,
         })
     });
     with_app(|app| app.apply_capture_settings());
+    // Look for a newer release shortly after startup, then once a day.
+    with_app(|app| {
+        app.update_timer.start(TimerMode::Repeated, Duration::from_secs(24 * 60 * 60), || {
+            with_app(|app| app.check_for_updates())
+        })
+    });
+    Timer::single_shot(Duration::from_secs(30), || with_app(|app| app.check_for_updates()));
     // Build the window ahead of time so the first open is styled and fast.
     on_ui(|app| app.prewarm());
 

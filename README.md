@@ -8,9 +8,24 @@ a global shortcut: type to filter, Enter to paste.
 
 Built in Rust with a native [Slint](https://slint.dev) UI, no browser engine.
 
+## Install
+
+Download `Wisp-x.y.z-setup.exe` from [Releases](https://github.com/Xzpy909/Wisp/releases/latest)
+and run it. It installs for your user only (no admin prompt) into
+`%LOCALAPPDATA%\Programs\Wisp` and adds Wisp to the Start menu. To update, run
+the newer installer; it closes the running Wisp first and keeps your clips.
+Uninstall from Settings → Apps; it asks whether to delete your clip history too.
+
+Prefer no installer? `Wisp-x.y.z-portable.zip` holds just `wisp.exe`.
+
+Wisp checks GitHub for a newer release once a day. When there is one, the tray
+menu shows **Update to Wisp x.y.z…** and the settings page links to it. Nothing
+is downloaded on its own. Turn the check off with **Check for updates** in the
+tray menu or settings.
+
 ## Status
 
-Milestones 1 to 3 and 5 of 7:
+Milestones 1 to 3, 5 and 7:
 
 - Records every copy: text, files and folders, and images (PNG or bitmap),
   with the app it came from. Repeat copies move to the top instead of
@@ -33,9 +48,8 @@ Milestones 1 to 3 and 5 of 7:
 - Opaque popup by default (about 4 MB of memory); optional acrylic glass on
   Windows 11 (about 40 MB, as it needs the GPU renderer)
 - Start with Windows (per-user, no admin), on by default
-- Single instance: launching Wisp again opens the popup
-
-Next: installer, update check and first release (milestone 7).
+- Single instance: launching Wisp again opens the popup; `wisp --quit` closes it
+- Installer, daily update check, and releases built by GitHub Actions
 
 ## Clip sets
 
@@ -86,8 +100,19 @@ cargo build --release -p wisp-app
 .\target\release\wisp.exe        # add --background to start hidden in the tray
 ```
 
-Every push also builds `wisp.exe` in GitHub Actions; download it from the run's
-artifacts.
+Every push also builds `wisp.exe` and the installer in GitHub Actions; download
+them from the run's artifacts. To build the installer locally, install
+[Inno Setup 6](https://jrsoftware.org/isinfo.php) and run
+`iscc /DAppVersion=0.1.0 installer\wisp.iss` (output in `dist\`).
+
+### Releasing
+
+1. Set `version` in the root `Cargo.toml` (for example `0.2.0`) and commit.
+2. Tag and push: `git tag v0.2.0` then `git push origin v0.2.0`.
+
+The Release workflow checks that the tag matches the version, runs the tests,
+builds the installer and the portable zip, and publishes a GitHub release with
+generated notes.
 
 ### Memory
 
@@ -117,7 +142,8 @@ saved to `%APPDATA%\Wisp\settings.json`:
   "keep-days": 30,
   "max-clips": 5000,
   "capture-images": true,
-  "capture-files": true
+  "capture-files": true,
+  "check-for-updates": true
 }
 ```
 
@@ -125,8 +151,9 @@ saved to `%APPDATA%\Wisp\settings.json`:
 
 ```
 crates/wisp-core   clip storage, search, clip sets, images, placement, settings; no Windows APIs, unit-tested anywhere
-crates/wisp-win    Win32: clipboard listener and paste, single instance, autostart, monitors, caret, focus
+crates/wisp-win    Win32: clipboard listener and paste, single instance, autostart, monitors, caret, focus, HTTPS (WinHTTP)
 crates/wisp-app    the executable: tray, hotkey, popup wiring
 ui/                Slint UI
+installer/         Inno Setup script for the installer
 docs/design/       interactive prototypes of the four popup concepts
 ```

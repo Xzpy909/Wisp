@@ -21,7 +21,19 @@ jobs:
         run: cargo clippy --workspace -- -D warnings
       - name: Build release
         run: cargo build --release -p wisp-app
+      - name: Build installer
+        shell: pwsh
+        run: |
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) {
+            choco install innosetup --no-progress -y
+            $env:PATH += ";${env:ProgramFiles(x86)}\Inno Setup 6"
+          }
+          $version = (cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages |
+            Where-Object name -eq 'wisp-app' | Select-Object -ExpandProperty version
+          iscc /DAppVersion=$version /DSourceExe=..\target\release\wisp.exe installer\wisp.iss
       - uses: actions/upload-artifact@v4
         with:
           name: wisp-windows-x64
-          path: target/release/wisp.exe
+          path: |
+            target/release/wisp.exe
+            dist/*.exe
