@@ -40,6 +40,12 @@ pub struct Settings {
     /// Acrylic glass behind the popup. Needs the GPU renderer, which costs
     /// about 35 MB more memory, so it is off by default.
     pub glass_effect: bool,
+    /// Delete unpinned clips older than this many days (0 = keep forever).
+    pub keep_days: u32,
+    /// Keep at most this many unpinned clips (0 = no limit).
+    pub max_clips: u32,
+    pub capture_images: bool,
+    pub capture_files: bool,
 }
 
 impl Default for Settings {
@@ -49,6 +55,10 @@ impl Default for Settings {
             hotkey: "Alt+V".into(),
             start_with_windows: true,
             glass_effect: false,
+            keep_days: 30,
+            max_clips: 5000,
+            capture_images: true,
+            capture_files: true,
         }
     }
 }
@@ -104,6 +114,10 @@ mod tests {
             hotkey: "Ctrl+Shift+Space".into(),
             start_with_windows: false,
             glass_effect: true,
+            keep_days: 7,
+            max_clips: 100,
+            capture_images: false,
+            capture_files: true,
         };
         s.save(&path).unwrap();
         let (loaded, first) = Settings::load(&path);

@@ -1,6 +1,19 @@
 // Wisp popup. One component serves all three popup styles: Beam (centre or
 // at cursor) and Drawer differ only in size, position and a header row.
 
+import { ListView, ScrollView, Switch, SpinBox, LineEdit, Button, Palette } from "std-widgets.slint";
+
+export struct ClipRow {
+    kind: string,
+    title: string,
+    meta: string,
+    pinned: bool,
+    swatch: color,
+    has-swatch: bool,
+    thumb: image,
+    has-thumb: bool,
+}
+
 component Kbd inherits Rectangle {
     in property <string> key;
     in property <color> ink;
@@ -9,7 +22,7 @@ component Kbd inherits Rectangle {
     border-color: line;
     border-radius: 4px;
     height: 18px;
-    min-width: label.preferred-width + 10px;
+    width: label.preferred-width + 10px;
     label := Text {
         text: root.key;
         color: root.ink;
@@ -26,6 +39,7 @@ component Hint inherits HorizontalLayout {
     in property <color> muted;
     in property <color> line;
     spacing: 5px;
+    horizontal-stretch: 0;
     VerticalLayout {
         alignment: center;
         Kbd { key: root.key; ink: root.ink; line: root.line; }
@@ -33,30 +47,139 @@ component Hint inherits HorizontalLayout {
     Text { text: root.label; color: root.muted; font-size: 11.5px; vertical-alignment: center; }
 }
 
-// Round close button: dark disc, thin rose ring, light cross.
-component CloseButton inherits Rectangle {
+// Icon button in the style shared across the owner's apps: a bare light
+// icon; on hover a rounded square appears behind it, red for close.
+component FaeButton inherits Rectangle {
     in property <bool> dark;
+    in property <bool> active;
+    in property <string> icon: "close";
     callback clicked();
-    property <color> rose: #e0577f;
-    width: 22px;
-    height: 22px;
-    border-radius: self.width / 2;
-    border-width: 1.5px;
-    border-color: touch.has-hover ? root.rose : root.rose.with-alpha(0.75);
-    background: touch.pressed ? root.rose.with-alpha(0.35)
-        : touch.has-hover ? root.rose.with-alpha(0.2)
-        : (root.dark ? #1b1b1f : #2a2a30);
-    Path {
-        width: 8px;
-        height: 8px;
+    property <bool> is-close: root.icon == "close";
+    property <color> hover-bg: root.is-close ? #c42b1c : (root.dark ? #3a3a3f : #e3e3e8);
+    property <color> icon-color: (root.is-close && (touch.has-hover || touch.pressed)) ? #ffffff
+        : (root.dark ? #c8c8cc : #45454a);
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: touch.pressed ? root.hover-bg.darker(0.15)
+        : (touch.has-hover || root.active) ? root.hover-bg
+        : transparent;
+    if root.is-close: Path {
+        width: 12px;
+        height: 12px;
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
-        viewbox-width: 8;
-        viewbox-height: 8;
-        stroke: #f4f4f6;
-        stroke-width: 1.5px;
+        viewbox-width: 12;
+        viewbox-height: 12;
+        stroke: root.icon-color;
+        stroke-width: 1.3px;
         fill: transparent;
-        commands: "M 0.5 0.5 L 7.5 7.5 M 7.5 0.5 L 0.5 7.5";
+        commands: "M 0.5 0.5 L 11.5 11.5 M 11.5 0.5 L 0.5 11.5";
+    }
+    if root.icon == "gear": Path {
+        width: 16px;
+        height: 16px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        viewbox-width: 16;
+        viewbox-height: 16;
+        stroke: root.icon-color;
+        stroke-width: 1.3px;
+        fill: transparent;
+        commands: "M 13.14 6.72 L 14.91 6.90 L 14.91 9.10 L 13.14 9.28 L 12.54 10.73 L 13.66 12.11 L 12.11 13.66 L 10.73 12.54 L 9.28 13.14 L 9.10 14.91 L 6.90 14.91 L 6.72 13.14 L 5.27 12.54 L 3.89 13.66 L 2.34 12.11 L 3.46 10.73 L 2.86 9.28 L 1.09 9.10 L 1.09 6.90 L 2.86 6.72 L 3.46 5.27 L 2.34 3.89 L 3.89 2.34 L 5.27 3.46 L 6.72 2.86 L 6.90 1.09 L 9.10 1.09 L 9.28 2.86 L 10.73 3.46 L 12.11 2.34 L 13.66 3.89 L 12.54 5.27 Z M 10.30 8.0 A 2.3 2.3 0 1 1 5.70 8.0 A 2.3 2.3 0 1 1 10.30 8.0";
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// A switch whose label wraps instead of running off a narrow window.
+component SwitchRow inherits HorizontalLayout {
+    in property <string> text;
+    in property <color> ink;
+    in-out property <bool> checked;
+    callback toggled();
+    spacing: 10px;
+    VerticalLayout {
+        alignment: start;
+        Switch {
+            checked <=> root.checked;
+            toggled => { root.toggled(); }
+        }
+    }
+    Text {
+        text: root.text;
+        color: root.ink;
+        wrap: word-wrap;
+        vertical-alignment: center;
+        horizontal-stretch: 1;
+    }
+}
+
+// Small glyph per clip kind.
+component KindIcon inherits Rectangle {
+    in property <ClipRow> clip-row;
+    in property <color> muted;
+    in property <color> line;
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: root.line;
+    clip: true;
+    background: root.clip-row.has-swatch ? root.clip-row.swatch : transparent;
+    if root.clip-row.has-thumb: Image {
+        width: parent.width;
+        height: parent.height;
+        source: root.clip-row.thumb;
+        image-fit: cover;
+    }
+    if !root.clip-row.has-thumb && !root.clip-row.has-swatch: Path {
+        width: 14px;
+        height: 14px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        viewbox-width: 16;
+        viewbox-height: 16;
+        stroke: root.clip-row.kind == "files" ? #d9480f
+            : root.clip-row.kind == "image" ? #7048e8
+            : root.clip-row.kind == "code" ? #0b7285
+            : root.clip-row.kind == "url" ? #2f6bff
+            : root.muted;
+        stroke-width: 1.4px;
+        fill: transparent;
+        commands: root.clip-row.kind == "files" ? "M 4 2 L 9 2 L 12 5 L 12 14 L 4 14 Z M 9 2 L 9 5 L 12 5"
+            : root.clip-row.kind == "image" ? "M 2 3 L 14 3 L 14 13 L 2 13 Z M 2 11 L 6 7 L 9 10 L 11 8 L 14 11"
+            : root.clip-row.kind == "code" ? "M 6 4 L 2 8 L 6 12 M 10 4 L 14 8 L 10 12"
+            : root.clip-row.kind == "url" ? "M 7 9 A 3 3 0 0 0 11 9 L 13 7 A 3 3 0 0 0 9 3 L 8 4 M 9 7 A 3 3 0 0 0 5 7 L 3 9 A 3 3 0 0 0 7 13 L 8 12"
+            : "M 3 4 L 13 4 M 3 8 L 13 8 M 3 12 L 9 12";
+    }
+}
+
+component Section inherits Text {
+    font-size: 12px;
+    font-weight: 600;
+}
+
+component Segment inherits Rectangle {
+    in property <string> label;
+    in property <bool> on;
+    in property <color> ink;
+    in property <color> line;
+    callback clicked();
+    height: 30px;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: root.on ? #2f6bff : root.line;
+    background: root.on ? #2f6bff33 : (touch.has-hover ? #8080801a : transparent);
+    Text {
+        text: root.label;
+        color: root.ink;
+        font-size: 12px;
+        font-weight: root.on ? 600 : 400;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
     }
     touch := TouchArea {
         mouse-cursor: pointer;
@@ -69,20 +192,67 @@ export component Popup inherits Window {
     in property <bool> dark: false;
     // True when Windows draws an acrylic backdrop behind the window.
     in property <bool> translucent: false;
-    in property <string> style-label: "Beam, centre of screen";
     in property <string> hotkey-label: "Alt+V";
     in-out property <string> query: "";
+    in property <[ClipRow]> clips;
+    in property <string> count-label;
+    in-out property <int> selected: 0;
+    // 0 = clip list, 1 = settings.
+    in-out property <int> page: 0;
+
+    // Settings, shown on the settings page.
+    in-out property <int> style-index: 0;
+    in-out property <bool> glass: false;
+    in-out property <bool> autostart: true;
+    in-out property <bool> capture-images: true;
+    in-out property <bool> capture-files: true;
+    in-out property <int> keep-days: 30;
+    in-out property <int> max-clips: 5000;
+    in-out property <string> hotkey-text: "Alt+V";
+    in property <string> hotkey-error;
+    in property <string> version: "0.1.0";
+
     callback dismiss();
+    callback query-edited(string);
+    callback settings-changed();
+    callback glass-toggled();
+    callback apply-hotkey(string);
+    callback clear-history();
+    callback open-data-folder();
 
     public function focus-search() {
         search.focus();
     }
 
+    // Standard widgets (switches, fields, buttons) follow the popup's theme.
+    init => {
+        Palette.color-scheme = root.dark ? ColorScheme.dark : ColorScheme.light;
+    }
+    changed dark => {
+        Palette.color-scheme = root.dark ? ColorScheme.dark : ColorScheme.light;
+    }
+
+    property <length> row-height: root.drawer ? 48px : 40px;
     property <color> ink: root.dark ? #ececf0 : #141416;
     property <color> muted: root.dark ? #a2a4ad : #5d5f66;
     property <color> line: root.dark ? #ffffff1a : #00000017;
     property <color> accent: #2f6bff;
+    property <color> sel: root.dark ? #5082ff38 : #2f6bff1f;
     property <color> panel: root.dark ? #202024 : #f9f9fb;
+
+    function move(delta: int) {
+        if (root.clips.length == 0) {
+            return;
+        }
+        root.selected = Math.max(0, Math.min(root.clips.length - 1, root.selected + delta));
+        // Keep the selected row in view.
+        if (root.selected * root.row-height + list.content-y < 0) {
+            list.content-y = -root.selected * root.row-height;
+        }
+        if ((root.selected + 1) * root.row-height + list.content-y > list.visible-height) {
+            list.content-y = list.visible-height - (root.selected + 1) * root.row-height;
+        }
+    }
 
     title: "Wisp";
     no-frame: true;
@@ -94,11 +264,23 @@ export component Popup inherits Window {
     FocusScope {
         key-pressed(event) => {
             if (event.text == Key.Escape) {
-                if (root.query != "") {
+                if (root.page == 1) {
+                    root.page = 0;
+                    search.focus();
+                } else if (root.query != "") {
                     root.query = "";
+                    root.query-edited("");
                 } else {
                     root.dismiss();
                 }
+                return accept;
+            }
+            if (root.page == 0 && event.text == Key.DownArrow) {
+                root.move(1);
+                return accept;
+            }
+            if (root.page == 0 && event.text == Key.UpArrow) {
+                root.move(-1);
                 return accept;
             }
             reject
@@ -114,45 +296,75 @@ export component Popup inherits Window {
             VerticalLayout {
                 if root.drawer: HorizontalLayout {
                     padding-left: 16px;
-                    padding-right: 16px;
+                    padding-right: 12px;
                     padding-top: 10px;
                     height: 36px;
+                    spacing: 8px;
                     Text { text: "Wisp"; font-weight: 600; color: root.ink; vertical-alignment: center; }
                     Text {
                         text: root.hotkey-label;
                         color: root.muted;
                         font-size: 11.5px;
-                        horizontal-alignment: right;
                         vertical-alignment: center;
                         horizontal-stretch: 1;
                     }
                     VerticalLayout {
                         alignment: center;
-                        CloseButton { dark: root.dark; clicked => { root.dismiss(); } }
+                        FaeButton {
+                            icon: "gear";
+                            dark: root.dark;
+                            active: root.page == 1;
+                            clicked => { root.page = root.page == 1 ? 0 : 1; }
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        FaeButton { icon: "close"; dark: root.dark; clicked => { root.dismiss(); } }
                     }
                 }
 
                 HorizontalLayout {
                     height: root.drawer ? 44px : 56px;
                     padding-left: 16px;
-                    padding-right: 16px;
+                    padding-right: 14px;
                     spacing: 10px;
                     VerticalLayout {
                         alignment: center;
-                        Path {
-                            width: 16px;
-                            height: 16px;
-                            viewbox-width: 16;
-                            viewbox-height: 16;
-                            stroke: root.muted;
-                            stroke-width: 1.5px;
-                            fill: transparent;
-                            commands: "M 10.5 10.5 L 14.5 14.5 M 11.5 6.5 A 5 5 0 1 1 1.5 6.5 A 5 5 0 1 1 11.5 6.5";
+                        // Magnifier on the list; a back arrow on the settings page.
+                        Rectangle {
+                            width: 28px;
+                            height: 28px;
+                            x: -6px;
+                            border-radius: 6px;
+                            background: root.page == 1 && back.has-hover ? (root.dark ? #3a3a3f : #e3e3e8) : transparent;
+                            Path {
+                                width: 16px;
+                                height: 16px;
+                                x: (parent.width - self.width) / 2;
+                                y: (parent.height - self.height) / 2;
+                                viewbox-width: 16;
+                                viewbox-height: 16;
+                                stroke: root.page == 1 ? root.ink : root.muted;
+                                stroke-width: 1.5px;
+                                fill: transparent;
+                                commands: root.page == 1
+                                    ? "M 10 3 L 5 8 L 10 13"
+                                    : "M 10.5 10.5 L 14.5 14.5 M 11.5 6.5 A 5 5 0 1 1 1.5 6.5 A 5 5 0 1 1 11.5 6.5";
+                            }
+                            back := TouchArea {
+                                enabled: root.page == 1;
+                                mouse-cursor: root.page == 1 ? pointer : default;
+                                clicked => {
+                                    root.page = 0;
+                                    search.focus();
+                                }
+                            }
                         }
                     }
                     Rectangle {
                         horizontal-stretch: 1;
                         search := TextInput {
+                            visible: root.page == 0;
                             width: 100%;
                             height: 100%;
                             text <=> root.query;
@@ -161,28 +373,106 @@ export component Popup inherits Window {
                             color: root.ink;
                             vertical-alignment: center;
                             selection-background-color: root.accent.with-alpha(0.35);
+                            edited => {
+                                root.selected = 0;
+                                list.content-y = 0;
+                                root.query-edited(self.text);
+                            }
                         }
                         Text {
-                            visible: root.query == "";
+                            visible: root.page == 1 || root.query == "";
                             width: 100%;
                             height: 100%;
-                            text: "Search clipboard history";
+                            text: root.page == 1 ? "Settings" : "Search clipboard history";
                             font-size: root.drawer ? 14px : 18px;
-                            color: root.muted;
+                            font-weight: root.page == 1 ? 600 : 400;
+                            color: root.page == 1 ? root.ink : root.muted;
                             vertical-alignment: center;
                         }
                     }
                     if !root.drawer: VerticalLayout {
                         alignment: center;
-                        CloseButton { dark: root.dark; clicked => { root.dismiss(); } }
+                        FaeButton {
+                            icon: "gear";
+                            dark: root.dark;
+                            active: root.page == 1;
+                            clicked => { root.page = root.page == 1 ? 0 : 1; }
+                        }
+                    }
+                    if !root.drawer: VerticalLayout {
+                        alignment: center;
+                        FaeButton { icon: "close"; dark: root.dark; clicked => { root.dismiss(); } }
                     }
                 }
 
                 Rectangle { height: 1px; background: root.line; }
 
+                // Clip list.
+                // Clip list and settings share this space; one shows at a time.
                 Rectangle {
                     vertical-stretch: 1;
-                    VerticalLayout {
+                    list := ListView {
+                        width: 100%;
+                        height: 100%;
+                        visible: root.page == 0;
+                        for row[i] in root.clips: Rectangle {
+                            height: root.row-height;
+                            Rectangle {
+                                x: 4px;
+                                width: parent.width - 8px;
+                                border-radius: 6px;
+                                background: i == root.selected ? root.sel : (hover.has-hover ? #8080800f : transparent);
+                                Rectangle {
+                                    visible: i == root.selected;
+                                    x: 0;
+                                    y: 9px;
+                                    width: 3px;
+                                    height: parent.height - 18px;
+                                    border-radius: 2px;
+                                    background: root.accent;
+                                }
+                                HorizontalLayout {
+                                    padding-left: 10px;
+                                    padding-right: 10px;
+                                    spacing: 10px;
+                                    VerticalLayout {
+                                        alignment: center;
+                                        KindIcon { clip-row: row; muted: root.muted; line: root.line; }
+                                    }
+                                    VerticalLayout {
+                                        alignment: center;
+                                        horizontal-stretch: 1;
+                                        spacing: 1px;
+                                        Text {
+                                            text: row.title;
+                                            color: root.ink;
+                                            overflow: elide;
+                                            font-family: row.kind == "code" ? "Consolas" : "";
+                                        }
+                                        if root.drawer: Text {
+                                            text: row.meta;
+                                            color: root.muted;
+                                            font-size: 11px;
+                                            overflow: elide;
+                                        }
+                                    }
+                                    if !root.drawer: Text {
+                                        text: row.meta;
+                                        color: root.muted;
+                                        font-size: 11.5px;
+                                        vertical-alignment: center;
+                                        horizontal-stretch: 0;
+                                    }
+                                }
+                                hover := TouchArea {
+                                    clicked => { root.selected = i; search.focus(); }
+                                }
+                            }
+                        }
+                    }
+                    if root.page == 0 && root.clips.length == 0: VerticalLayout {
+                        width: 100%;
+                        height: 100%;
                         alignment: center;
                         padding: 24px;
                         spacing: 6px;
@@ -195,10 +485,160 @@ export component Popup inherits Window {
                             wrap: word-wrap;
                         }
                         Text {
-                            text: "Clipboard capture arrives in milestone 2. For now this window opens with " + root.hotkey-label + " and closes with Esc.";
+                            text: root.query == "" ? "Copy some text, a file or an image and it shows up here." : "Try fewer letters, or press Esc to clear.";
                             color: root.muted;
                             horizontal-alignment: center;
                             wrap: word-wrap;
+                        }
+                    }
+                    // Settings page. Labels sit above their controls so the
+                    // page also fits the narrow Drawer at any scale.
+                    if root.page == 1: sv := ScrollView {
+                        width: 100%;
+                        height: 100%;
+                        VerticalLayout {
+                            width: sv.visible-width;
+                            alignment: start;
+                            padding: 16px;
+                            padding-top: 12px;
+                            spacing: 10px;
+
+                            Section { text: "Popup"; color: root.ink; }
+                            if !root.drawer: HorizontalLayout {
+                                spacing: 6px;
+                                Segment {
+                                    label: "Beam, centre";
+                                    on: root.style-index == 0;
+                                    ink: root.ink;
+                                    line: root.line;
+                                    clicked => { root.style-index = 0; root.settings-changed(); }
+                                }
+                                Segment {
+                                    label: "Beam, at cursor";
+                                    on: root.style-index == 1;
+                                    ink: root.ink;
+                                    line: root.line;
+                                    clicked => { root.style-index = 1; root.settings-changed(); }
+                                }
+                                Segment {
+                                    label: "Drawer";
+                                    on: root.style-index == 2;
+                                    ink: root.ink;
+                                    line: root.line;
+                                    clicked => { root.style-index = 2; root.settings-changed(); }
+                                }
+                            }
+                            if root.drawer: VerticalLayout {
+                                spacing: 6px;
+                                Segment {
+                                    label: "Beam, centre";
+                                    on: root.style-index == 0;
+                                    ink: root.ink;
+                                    line: root.line;
+                                    clicked => { root.style-index = 0; root.settings-changed(); }
+                                }
+                                Segment {
+                                    label: "Beam, at cursor";
+                                    on: root.style-index == 1;
+                                    ink: root.ink;
+                                    line: root.line;
+                                    clicked => { root.style-index = 1; root.settings-changed(); }
+                                }
+                                Segment {
+                                    label: "Drawer";
+                                    on: root.style-index == 2;
+                                    ink: root.ink;
+                                    line: root.line;
+                                    clicked => { root.style-index = 2; root.settings-changed(); }
+                                }
+                            }
+                            SwitchRow {
+                                text: "Glass effect (uses about 35 MB more memory, restarts Wisp)";
+                                ink: root.ink;
+                                checked <=> root.glass;
+                                toggled => { root.glass-toggled(); }
+                            }
+                            Text { text: "Shortcut"; color: root.ink; }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                hk := LineEdit {
+                                    text <=> root.hotkey-text;
+                                    placeholder-text: "Alt+V";
+                                    horizontal-stretch: 1;
+                                    accepted(t) => { root.apply-hotkey(t); }
+                                }
+                                Button { text: "Apply"; clicked => { root.apply-hotkey(hk.text); } }
+                            }
+                            if root.hotkey-error != "": Text {
+                                text: root.hotkey-error;
+                                color: #e0577f;
+                                font-size: 12px;
+                                wrap: word-wrap;
+                            }
+
+                            Rectangle { height: 1px; background: root.line; }
+                            Section { text: "History"; color: root.ink; }
+                            Text { text: "Keep clips for (days, 0 = forever)"; color: root.ink; wrap: word-wrap; }
+                            HorizontalLayout {
+                                alignment: start;
+                                SpinBox {
+                                    width: 150px;
+                                    minimum: 0;
+                                    maximum: 3650;
+                                    value <=> root.keep-days;
+                                    edited => { root.settings-changed(); }
+                                }
+                            }
+                            Text { text: "Keep at most (clips, 0 = no limit)"; color: root.ink; wrap: word-wrap; }
+                            HorizontalLayout {
+                                alignment: start;
+                                SpinBox {
+                                    width: 150px;
+                                    minimum: 0;
+                                    maximum: 100000;
+                                    step-size: 500;
+                                    value <=> root.max-clips;
+                                    edited => { root.settings-changed(); }
+                                }
+                            }
+                            Text { text: "Pinned clips are always kept."; color: root.muted; font-size: 12px; wrap: word-wrap; }
+                            SwitchRow {
+                                text: "Record copied images";
+                                ink: root.ink;
+                                checked <=> root.capture-images;
+                                toggled => { root.settings-changed(); }
+                            }
+                            SwitchRow {
+                                text: "Record copied files and folders";
+                                ink: root.ink;
+                                checked <=> root.capture-files;
+                                toggled => { root.settings-changed(); }
+                            }
+                            if !root.drawer: HorizontalLayout {
+                                spacing: 8px;
+                                alignment: start;
+                                Button { text: "Clear history (keeps pinned)"; clicked => { root.clear-history(); } }
+                                Button { text: "Open data folder"; clicked => { root.open-data-folder(); } }
+                            }
+                            if root.drawer: VerticalLayout {
+                                spacing: 8px;
+                                Button { text: "Clear history (keeps pinned)"; clicked => { root.clear-history(); } }
+                                Button { text: "Open data folder"; clicked => { root.open-data-folder(); } }
+                            }
+
+                            Rectangle { height: 1px; background: root.line; }
+                            Section { text: "System"; color: root.ink; }
+                            SwitchRow {
+                                text: "Start with Windows";
+                                ink: root.ink;
+                                checked <=> root.autostart;
+                                toggled => { root.settings-changed(); }
+                            }
+                            Text {
+                                text: "Wisp " + root.version + " · Made with Slint";
+                                color: root.muted;
+                                font-size: 11.5px;
+                            }
                         }
                     }
                 }
@@ -210,12 +650,12 @@ export component Popup inherits Window {
                     padding-left: 14px;
                     padding-right: 14px;
                     spacing: 14px;
-                    Hint { key: "Enter"; label: "Paste"; ink: root.ink; muted: root.muted; line: root.line; }
-                    Hint { key: "Tab"; label: "Filter"; ink: root.ink; muted: root.muted; line: root.line; }
-                    Hint { key: "Esc"; label: "Close"; ink: root.ink; muted: root.muted; line: root.line; }
+                    if root.page == 0: Hint { key: "↑↓"; label: "Move"; ink: root.ink; muted: root.muted; line: root.line; }
+                    if root.page == 0: Hint { key: "Esc"; label: "Clear, close"; ink: root.ink; muted: root.muted; line: root.line; }
+                    if root.page == 1: Hint { key: "Esc"; label: "Back to clips"; ink: root.ink; muted: root.muted; line: root.line; }
                     Text {
                         horizontal-stretch: 1;
-                        text: root.drawer ? "" : root.style-label;
+                        text: root.count-label;
                         color: root.muted;
                         font-size: 11.5px;
                         horizontal-alignment: right;

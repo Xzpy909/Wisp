@@ -3,6 +3,7 @@
 #![cfg(windows)]
 
 pub mod autostart;
+pub mod clipboard;
 pub mod instance;
 pub mod screen;
 pub mod window;

@@ -9,15 +9,17 @@ pub enum Action {
     Style(PopupStyle),
     ToggleAutostart,
     ToggleGlass,
+    TogglePause,
     Quit,
 }
 
 pub struct Tray {
-    _icon: TrayIcon,
+    icon: TrayIcon,
     open: MenuItem,
     styles: Vec<(PopupStyle, CheckMenuItem)>,
     autostart: CheckMenuItem,
     glass: CheckMenuItem,
+    pause: CheckMenuItem,
     quit: MenuItem,
 }
 
@@ -34,11 +36,13 @@ impl Tray {
         }
         let autostart = CheckMenuItem::new("Start with Windows", true, settings.start_with_windows, None);
         let glass = CheckMenuItem::new("Glass effect (uses more memory)", true, settings.glass_effect, None);
+        let pause = CheckMenuItem::new("Pause recording", true, false, None);
         let quit = MenuItem::new("Quit Wisp", true, None);
 
         let menu = Menu::new();
         menu.append_items(&[
             &open,
+            &pause,
             &PredefinedMenuItem::separator(),
             &style_menu,
             &glass,
@@ -55,7 +59,7 @@ impl Tray {
             .with_menu_on_left_click(false)
             .build()?;
 
-        Ok(Self { _icon: tray, open, styles, autostart, glass, quit })
+        Ok(Self { icon: tray, open, styles, autostart, glass, pause, quit })
     }
 
     pub fn action_for(&self, id: &MenuId) -> Option<Action> {
@@ -68,14 +72,24 @@ impl Tray {
         if id == self.glass.id() {
             return Some(Action::ToggleGlass);
         }
+        if id == self.pause.id() {
+            return Some(Action::TogglePause);
+        }
         if id == self.quit.id() {
             return Some(Action::Quit);
         }
         self.styles.iter().find(|(_, item)| id == item.id()).map(|(s, _)| Action::Style(*s))
     }
 
+    /// Show the current shortcut in the menu and the tooltip.
+    pub fn set_hotkey(&self, hotkey: &str) {
+        self.open.set_text(format!("Open Wisp\t{hotkey}"));
+        let _ = self.icon.set_tooltip(Some(format!("Wisp ({hotkey})")));
+    }
+
     /// Make the check marks match the settings (muda toggles them on click).
-    pub fn sync(&self, settings: &Settings) {
+    pub fn sync(&self, settings: &Settings, paused: bool) {
+        self.pause.set_checked(paused);
         for (s, item) in &self.styles {
             item.set_checked(*s == settings.popup_style);
         }

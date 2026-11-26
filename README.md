@@ -8,18 +8,28 @@ Built in Rust with a native [Slint](https://slint.dev) UI, no browser engine.
 
 ## Status
 
-Milestone 1 of 7, the skeleton:
+Milestones 1 and 2 of 7:
 
-- Tray icon with menu: open, popup style, Start with Windows, quit
-- `Alt+V` opens and closes the popup; Esc closes it and returns focus
+- Records every copy: text, files and folders, and images (PNG or bitmap),
+  with the app it came from. Repeat copies move to the top instead of
+  duplicating. Content that password managers mark as private is skipped.
+- History in SQLite (`%APPDATA%\Wisp\wisp.db`), images and thumbnails as PNG
+  files beside it. Old clips are removed after 30 days or beyond 5,000 clips
+  (both adjustable); pinned clips are always kept.
+- `Alt+V` opens the popup with the newest clips; type to filter, arrows to move,
+  Esc to clear and close
+- Settings inside the popup (gear button next to close): popup style, glass
+  effect, shortcut, history limits, what to record, Start with Windows, clear
+  history
+- Tray icon with menu, including Pause recording
 - Three popup styles: Beam at the centre of the screen, Beam at the text
-  cursor, and Drawer by the tray (switch in the tray menu)
+  cursor, and Drawer by the tray
 - Opaque popup by default (about 4 MB of memory); optional acrylic glass on
-  Windows 11 from the tray menu (about 40 MB, as it needs the GPU renderer)
+  Windows 11 (about 40 MB, as it needs the GPU renderer)
 - Start with Windows (per-user, no admin), on by default
 - Single instance: launching Wisp again opens the popup
 
-Clipboard capture, search and paste arrive in milestones 2 and 3.
+Paste (Enter) and fuzzy search arrive in milestone 3.
 
 ## Build and run
 
@@ -50,26 +60,27 @@ menu's **Glass effect** item switches modes and restarts Wisp. `SLINT_BACKEND`
 
 ## Settings
 
-`%APPDATA%\Wisp\settings.json`:
+Open the popup and click the gear next to the close button. Settings are
+saved to `%APPDATA%\Wisp\settings.json`:
 
 ```json
 {
   "popup-style": "beam-centre",
   "hotkey": "Alt+V",
   "start-with-windows": true,
-  "glass-effect": false
+  "glass-effect": false,
+  "keep-days": 30,
+  "max-clips": 5000,
+  "capture-images": true,
+  "capture-files": true
 }
 ```
-
-`popup-style` is `beam-centre`, `beam-cursor` or `drawer`. `hotkey` accepts
-combinations like `Ctrl+Shift+Space`. Restart Wisp after editing the file; a
-settings window comes in milestone 6.
 
 ## Layout
 
 ```
-crates/wisp-core   placement and settings, no Windows APIs, unit-tested anywhere
-crates/wisp-win    Win32 helpers: single instance, autostart, monitors, caret, focus
+crates/wisp-core   clip storage, images, placement, settings; no Windows APIs, unit-tested anywhere
+crates/wisp-win    Win32: clipboard listener, single instance, autostart, monitors, caret, focus
 crates/wisp-app    the executable: tray, hotkey, popup wiring
 ui/                Slint UI
 docs/design/       interactive prototypes of the four popup concepts
