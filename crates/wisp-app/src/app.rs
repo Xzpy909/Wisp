@@ -310,6 +310,12 @@ impl App {
         self.sync_marks();
     }
 
+    /// Mark every listed clip (the current search and filter's results).
+    fn select_all(&mut self) {
+        self.marked = self.popup.get_clips().iter().map(|r| r.id as i64).collect();
+        self.sync_marks();
+    }
+
     fn sync_marks(&self) {
         let model = self.popup.get_clips();
         for i in 0..model.row_count() {
@@ -857,6 +863,7 @@ pub fn run() {
         let _ = std::fs::create_dir_all(&dir);
         let _ = std::process::Command::new("explorer").arg(dir).spawn();
     });
+    popup.on_select_all(|| with_app(|app| app.select_all()));
     popup.on_row_pressed(|i, shift, ctrl| with_app(|app| app.row_pressed(i.max(0) as usize, shift, ctrl)));
     popup.on_paste(|id, plain| with_app(|app| app.paste(id as i64, plain)));
     popup.on_toggle_pin(|id| with_app(|app| app.toggle_pin(id as i64)));

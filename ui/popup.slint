@@ -314,6 +314,7 @@ export component Popup inherits Window {
     callback filter-changed();
     // A row was clicked or reached with the arrows; Rust keeps the marks.
     callback row-pressed(int, bool, bool);
+    callback select-all();
 
     public function focus-search() {
         search.focus();
@@ -417,6 +418,10 @@ export component Popup inherits Window {
                     if (root.selected-id() >= 0) {
                         root.forget(root.selected-id());
                     }
+                    return accept;
+                }
+                if (event.text == "a" || event.text == "A") {
+                    root.select-all();
                     return accept;
                 }
                 if (event.text == "o" || event.text == "O") {
@@ -879,6 +884,7 @@ export component Popup inherits Window {
                                 { key: "Shift+click, Ctrl+click", what: "Select several clips (also Shift+↑↓); Enter pastes them together" },
                                 { key: "Right-click", what: "Paste, pin or unpin, show in File Explorer, forget" },
                                 { key: "Tab, Shift+Tab", what: "Show only text, links, images, files, colours, code or pinned" },
+                                { key: "Ctrl+A", what: "Select all listed clips" },
                                 { key: "Ctrl+P", what: "Pin or unpin. Pinned clips stay on top and are never removed" },
                                 { key: "Ctrl+Delete", what: "Forget the clip" },
                                 { key: "Ctrl+O", what: "Show a file or image clip in File Explorer" },

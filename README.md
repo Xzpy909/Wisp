@@ -59,6 +59,7 @@ as in `wisp.db`, `clip_images` with the PNG and thumbnail as blobs, and a
 | Enter, double-click | Paste into the app you were in |
 | Shift+Enter | Paste as plain text (files as their paths) |
 | Shift+click, Ctrl+click, Shift+↑↓ | Select several clips; Enter pastes them together (text one per line, files as files) and Ctrl+P, Ctrl+Delete act on all of them |
+| Ctrl+A | Select all listed clips |
 | Right-click | Menu: Paste, Paste as plain text, Pin or Unpin, Show in File Explorer, Forget |
 | Tab, Shift+Tab | Show only text, links, images, files, colours, code or pinned clips |
 | Ctrl+P | Pin or unpin; pinned clips stay on top and are never removed |
