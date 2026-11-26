@@ -46,6 +46,8 @@ pub struct Settings {
     pub max_clips: u32,
     pub capture_images: bool,
     pub capture_files: bool,
+    /// Look for a newer release on GitHub once a day.
+    pub check_for_updates: bool,
 }
 
 impl Default for Settings {
@@ -59,6 +61,7 @@ impl Default for Settings {
             max_clips: 5000,
             capture_images: true,
             capture_files: true,
+            check_for_updates: true,
         }
     }
 }
@@ -118,6 +121,7 @@ mod tests {
             max_clips: 100,
             capture_images: false,
             capture_files: true,
+            check_for_updates: false,
         };
         s.save(&path).unwrap();
         let (loaded, first) = Settings::load(&path);
@@ -140,5 +144,6 @@ mod tests {
         assert_eq!(s.hotkey, "Alt+V");
         assert!(s.start_with_windows);
         assert!(!s.glass_effect);
+        assert!(s.check_for_updates);
     }
 }

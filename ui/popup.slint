@@ -356,6 +356,10 @@ export component Popup inherits Window {
     in-out property <string> hotkey-text: "Alt+V";
     in property <string> hotkey-error;
     in property <string> version: "0.1.0";
+    in-out property <bool> check-updates: true;
+    /// Set when a newer release exists.
+    in property <string> update-version;
+    callback get-update();
 
     callback dismiss();
     callback query-edited(string);
@@ -1012,6 +1016,21 @@ export component Popup inherits Window {
                                 ink: root.ink;
                                 checked <=> root.autostart;
                                 toggled => { root.settings-changed(); }
+                            }
+                            SwitchRow {
+                                text: "Check for updates (once a day, on GitHub)";
+                                ink: root.ink;
+                                checked <=> root.check-updates;
+                                toggled => { root.settings-changed(); }
+                            }
+                            if root.update-version != "": Text {
+                                text: "Wisp " + root.update-version + " is available. Get it →";
+                                color: root.accent;
+                                font-weight: 600;
+                                TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => { root.get-update(); }
+                                }
                             }
                             Text {
                                 text: "Wisp " + root.version + " · Made with Slint";

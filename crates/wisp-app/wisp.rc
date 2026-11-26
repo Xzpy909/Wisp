@@ -1,2 +1,0 @@
-// Windows resources for wisp.exe: the app icon. The tray loads it too (ordinal 1).
-1 ICON "../../assets/icons/wisp.ico"

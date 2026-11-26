@@ -9,6 +9,7 @@ pub mod placement;
 pub mod search;
 pub mod settings;
 pub mod store;
+pub mod update;
 
 pub use clip::{Captured, Clip, ClipContent, Kind};
 pub use placement::{popup_rect, Point, Rect};
